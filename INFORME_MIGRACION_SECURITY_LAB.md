@@ -49,6 +49,8 @@ Anexo A: aquí sirven como evidencia de que el laboratorio efectivamente encuent
 | M15 | El servicio de clonado montaba `~/.ssh` completo | 🟠 Alto | ✅ Cerrado | DevOps/Infra | 1 h |
 | M16 | Los directorios de reportes los crea el primer contenedor: si corre como root, las herramientas no privilegiadas no pueden escribir y la dimensión se pierde | 🟡 Medio | ✅ Cerrado | DevOps/Infra | 1 h |
 | M17 | ZAP aborta la corrida por una *advertencia* del plan; sin eso, «ignorar su salida» ocultaría una corrida que no produjo nada | 🟡 Medio | ✅ Cerrado | DevOps/Infra | 1 h |
+| M18 | Los resultados se entregaban como SARIF crudo: ilegibles para quien no construyó el laboratorio | 🟠 Alto | ✅ Cerrado | Líder Técnico | 4 h |
+| M19 | El bug de `source` sobre `target.env` sobrevivía en `gate.sh` y `run-manifest.sh`: el manifiesto registraba «(not a git checkout)» sobre un repo git | 🟠 Alto | ✅ Cerrado | DevOps/Infra | 30 min |
 
 Severidad: 🔴 Crítico · 🟠 Alto · 🟡 Medio · 🟢 Bajo — Estado: Abierto / Parcial / Cerrado.
 
@@ -759,6 +761,103 @@ Prioridad 2 · 1 h · **hecho**.
 
 ---
 
+## M18 · 🟠 Alto · ✅ Cerrado — Los resultados se entregaban como SARIF crudo
+**Responsable: Líder Técnico**
+
+### Qué está pasando
+Al terminar una corrida, `reports/<perfil>/` contenía cinco archivos SARIF de herramientas
+distintas, dos JSON con formatos propios (Playwright, k6), una página HTML de ZAP y un `RUN.md`.
+Nada de eso es legible para quien no construyó el laboratorio, y las herramientas ni siquiera
+coinciden en dónde ponen la severidad: Trivy la etiqueta y además da CVSS, semgrep la etiqueta,
+ZAP usa el `level` de SARIF y gitleaks no dice nada.
+
+### Por qué es un error
+El laboratorio se entrega a un equipo no familiarizado. Producir evidencia que nadie del equipo
+receptor puede leer equivale a no producirla: el resultado práctico es que la corrida se ejecuta,
+nadie interpreta la salida y la herramienta se abandona.
+
+### Recomendación de remediación
+*Explicación.* Hacía falta una capa de presentación, pero **no un servicio**. Un panel que ejecuta
+análisis necesita el socket de Docker, es decir, ejecución remota de código por diseño; y es
+exactamente el modo de fallo del hallazgo L1 (exposición en la LAN). Un archivo HTML generado no
+tiene superficie de ataque, se abre con doble clic y se adjunta a un correo.
+
+*Orientación.* `tools/dashboard.py` (sólo biblioteca estándar) → `make dashboard TARGET=<perfil>` →
+`reports/<perfil>/index.html`. Tres propiedades deliberadas:
+
+1. **No recalcula el veredicto**: invoca `tools/gate.sh` y analiza su salida, para que la página y
+   el pipeline no puedan discrepar.
+2. **Una dimensión sin ejecutar se pinta `NO EJECUTADO`, nunca como cero hallazgos.** Es la regla
+   de M3 llevada a la interfaz: un gráfico tranquilizador sobre un análisis que nadie corrió es
+   peor que no tener gráfico.
+3. **Autocontenido**: sin servidor, sin CDN, sin red.
+
+La severidad se resuelve en cascada — etiqueta explícita, luego CVSS (`security-severity`), luego
+el `level` de SARIF — porque cada herramienta la coloca en un sitio distinto y el `level` colapsa
+distinciones que la herramienta sí había hecho.
+
+### Verificación
+```bash
+make dashboard TARGET=antiplagio && make dashboard TARGET=costos_web
+grep -c 'src="http\|href="http\|@import\|cdn' reports/antiplagio/index.html    # 0
+```
+Ejecutado sobre **ambos** perfiles: en antiplagio refleja 165/90/3/4/57 y marca `NO EJECUTADO` en
+imágenes, carga y calidad; en costos_web marca `NO EJECUTADO` en Trivy, semgrep y ZAP, y muestra
+k6. Cero recursos externos. Es también la prueba de que la capa de presentación quedó agnóstica.
+
+### Prioridad y esfuerzo
+Prioridad 2 · 4 h · **hecho**.
+
+> **Siguiente capa, si se decide construirla:** un panel local que además *lance* análisis. Debe
+> atarse a `127.0.0.1`, no exponerse jamás, y documentarse como lo que es — un servicio con acceso
+> al socket de Docker es ejecución remota de código para quien lo alcance.
+
+---
+
+## M19 · 🟠 Alto · ✅ Cerrado — El bug de `source` sobrevivía en dos herramientas más
+**Responsable: DevOps/Infra**
+
+### Qué está pasando
+Al construir el dashboard salió a la luz que `gate.sh` y `run-manifest.sh` seguían haciendo
+`set -a; . target.env`. Con `SRC_PATH=/opt/MANUALES DE DESPLIEGUE WITH REPORT/...`, el intérprete
+ejecuta `DE` como comando y la variable queda vacía. Resultado visible: el manifiesto registraba
+
+```
+- commit: `(not a git checkout)`
+```
+
+sobre un repositorio git perfectamente normal.
+
+### Por qué es un error
+El manifiesto existe para responder *qué commit se auditó*. Si eso miente, el artefacto pierde su
+única razón de ser, y la corrida deja de ser reproducible. El fallo era silencioso: nada avisa.
+
+### Recomendación de remediación
+*Explicación.* Ya se había corregido en `doctor.sh` durante esta misma intervención, pero la
+corrección no se propagó. Un perfil de target es **dato**, no código: no debe ejecutarse nunca,
+tanto por robustez como porque `source` sobre un archivo de configuración es ejecución arbitraria.
+
+*Orientación.* La misma lectura sin `source` en las tres herramientas:
+```bash
+envget() { sed -n "s/^${1}=//p" "$ENVFILE" | tail -1 | sed 's/^"//; s/"$//'; }
+```
+
+### Verificación
+```bash
+make run-manifest TARGET=antiplagio && head -8 reports/antiplagio/RUN.md
+```
+Ejecutado — ahora registra el commit real (`ce92fa1050a574…`) y el sobre de recursos
+(`cpus=4 memory=2048m`). `make gate` sigue dando el mismo veredicto.
+
+### Prioridad y esfuerzo
+Prioridad 1 · 30 min · **hecho**.
+
+> **Patrón a recordar:** este bug se encontró porque una capa nueva *consumió* datos que nadie
+> había leído con atención. Construir un consumidor de tus propios artefactos es una forma barata
+> de auditar su calidad.
+
+---
+
 # Los tres cubos de trabajo del controlador
 
 La pregunta central de esta migración: **qué hace la herramienta, qué debe aportar la persona y qué
@@ -780,6 +879,7 @@ repositorio**:
 | DAST | `make dast` | 57 alertas (56 en Moodle, 1 en la API) |
 | Calidad | `make sonar` / `make qodana` | **no ejecutado** (M8) |
 | Reportes, manifiesto, desmontaje | `make run-manifest` / `make down` | — |
+| Lectura de resultados | `make dashboard` | una página HTML, sin servidor |
 
 Coste de puesta en marcha para este proyecto: **editar un archivo**. `make detect` dedujo solo el
 censo de lenguajes, el linter aplicable, el adaptador de autenticación (`moodle-session`, a partir
@@ -867,6 +967,9 @@ Por riesgo y esfuerzo, para el equipo receptor:
    hoy es la única dimensión **inconclusa** *(8 h)*.
 5. **M12** — reglas de semgrep para `docker-compose` *(4 h)*.
 6. **M13** — pasadas múltiples de Qodana en proyectos poliglotas *(2 h)*.
+7. *(Opcional)* Panel local sobre el dashboard, atado a `127.0.0.1`, para lanzar análisis desde
+   el navegador. Sólo si el equipo lo pide: añade una superficie de ejecución de código que hoy
+   no existe, y el dashboard ya resuelve el problema de legibilidad *(2-3 días)*.
 
 Todo lo marcado ✅ está aplicado y verificado en esta corrida.
 

@@ -30,7 +30,7 @@ guard:
 	@mkdir -p $(REPORTS) $(REPORTS)/trivy $(REPORTS)/semgrep $(REPORTS)/sbom $(REPORTS)/sonar \
 	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build
 
-.PHONY: help list new detect doctor guard clone up down purge status gate run-manifest \
+.PHONY: help list new detect doctor guard clone up down purge status gate dashboard run-manifest \
         sonar qodana semgrep secrets deps config-scan image-scan sbom static \
         build dast perf e2e all
 
@@ -116,6 +116,9 @@ run-manifest: guard ## write reports/$(TARGET)/RUN.md (commit, digests, envelope
 
 gate: guard       ## exit != 0 when the thresholds in target.env are breached
 	@tools/gate.sh "$(TARGET)"
+
+dashboard: guard  ## build reports/$(TARGET)/index.html — one readable page from every tool
+	@tools/dashboard.py "$(TARGET)"
 
 status: guard     ## what is up, what has been run, what is missing
 	@tools/status.sh "$(TARGET)"

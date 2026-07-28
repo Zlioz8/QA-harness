@@ -8,8 +8,16 @@
 set -uo pipefail
 TARGET="${1:?usage: gate.sh <target>}"
 R="reports/$TARGET"
-# shellcheck disable=SC1090
-set -a; . "targets/$TARGET/target.env" 2>/dev/null; set +a
+ENVFILE="targets/$TARGET/target.env"
+# Read thresholds WITHOUT sourcing: a value containing spaces would be executed as a command
+# (see the note in run-manifest.sh), and a target profile is data, not code.
+envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed 's/^"//; s/"$//'; }
+ALLOW_SECRETS=$(envget ALLOW_SECRETS)
+MAX_DEP_FINDINGS=$(envget MAX_DEP_FINDINGS)
+MAX_SAST_FINDINGS=$(envget MAX_SAST_FINDINGS)
+MAX_DAST_FINDINGS=$(envget MAX_DAST_FINDINGS)
+K6_P95_MS=$(envget K6_P95_MS)
+K6_ERR_RATE=$(envget K6_ERR_RATE)
 
 FAIL=0
 pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; }

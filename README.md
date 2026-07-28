@@ -55,8 +55,29 @@ make up TARGET=proyecto_x
 make e2e dast perf TARGET=proyecto_x
 make run-manifest TARGET=proyecto_x      # reports/proyecto_x/RUN.md: cobertura real
 make gate         TARGET=proyecto_x      # veredicto: sale != 0 si se incumplen umbrales
+make dashboard    TARGET=proyecto_x      # reports/proyecto_x/index.html: todo en una página
 make down         TARGET=proyecto_x      # sin residuos
 ```
+
+## Leer los resultados
+
+```bash
+make dashboard TARGET=proyecto_x && xdg-open reports/proyecto_x/index.html
+```
+
+Cada herramienta escribe en su propio dialecto: cinco SARIF que no se ponen de acuerdo en dónde
+va la severidad, más JSON de Playwright y de k6. `make dashboard` los consolida en un HTML
+autocontenido — sin servidor, sin dependencias, sin red — con el veredicto de la compuerta, la
+cobertura real y la evidencia `archivo:línea`.
+
+Tres decisiones deliberadas de esa página:
+
+- **No recalcula el veredicto**: invoca `tools/gate.sh` y muestra su salida, de modo que el
+  dashboard y el pipeline no puedan discrepar sobre si la corrida pasó.
+- **Una dimensión sin ejecutar se pinta `NO EJECUTADO`, jamás como cero hallazgos.** Un gráfico
+  tranquilizador sobre un análisis que nadie corrió es peor que no tener gráfico.
+- **Es un archivo**, no un servicio. Se abre con doble clic y se adjunta a un correo. Un tablero
+  de seguridad que necesita un servidor para leerse es un servidor que alguien acabará exponiendo.
 
 `make help` lista todos los objetivos. `make list` los perfiles existentes.
 

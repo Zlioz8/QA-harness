@@ -8,8 +8,15 @@
 set -uo pipefail
 TARGET="${1:?usage: run-manifest.sh <target>}"
 R="reports/$TARGET"; mkdir -p "$R"
-# shellcheck disable=SC1090
-set -a; . "targets/$TARGET/target.env" 2>/dev/null; set +a
+ENVFILE="targets/$TARGET/target.env"
+# Read the profile WITHOUT sourcing it. `. target.env` breaks on any unquoted value containing
+# spaces — a path like /opt/MANUALES DE DESPLIEGUE/... silently becomes a command, SRC_PATH ends
+# up empty, and the manifest then records "(not a git checkout)" for a perfectly normal git repo.
+# A manifest that misreports which commit was audited is worse than no manifest.
+envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed 's/^"//; s/"$//'; }
+SRC_PATH=$(envget SRC_PATH)
+PERF_CPUS=$(envget PERF_CPUS)
+PERF_MEM=$(envget PERF_MEM)
 OUT="$R/RUN.md"
 
 commit="(not a git checkout)"
