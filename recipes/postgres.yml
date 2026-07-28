@@ -1,0 +1,25 @@
+# RECIPE: PostgreSQL, ephemeral.
+# The target's db-init/*.sql run in alphabetical order on FIRST boot only — that is where a
+# project's schema and its two test accounts go. Destroyed by `make down` (-v): no residue.
+services:
+  db:
+    profiles: ["runtime", "dast", "perf", "e2e", "prod"]
+    image: ${DB_IMAGE:-postgres:17}
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      # PATH SEMANTICS, the subtlest trap in this whole lab: `include:` resolves the path OF the
+      # included file against the project directory, but paths INSIDE the included file against
+      # the included file's own directory. So this is ../targets/... , not ./targets/... .
+      # Get it wrong and Docker creates an empty directory and mounts that — the seed silently
+      # never runs, the database comes up empty, and every later result is quietly wrong.
+      - ../targets/${TARGET_NAME}/db-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    # Not published: nothing outside the compose network needs the database, and publishing it
+    # is how an audit lab ends up serving real data to the LAN (finding L1).

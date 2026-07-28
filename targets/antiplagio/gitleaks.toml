@@ -1,0 +1,25 @@
+# gitleaks config — EXTEND the defaults, never replace them.
+[extend]
+useDefault = true
+
+# Generic: any password/secret/token assigned in a committed file.
+[[rules]]
+id = "env-assigned-secret"
+description = "Password/secret/token assigned in a committed file"
+regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY)\s*=\s*\S{4,}'''
+tags = ["generic", "env"]
+
+# Project-specific: this stack authenticates services to each other with shared secrets
+# passed through env files, several of which are committed.
+[[rules]]
+id = "antiplag-shared-secret"
+description = "Analyzer -> API shared secret / Moodle web-service token"
+regex = '''(?i)(PROCESS_STATUS_SECRET|OWNER_PASSWORD|WSTOKEN|WS_TOKEN|MOODLE_TOKEN)\s*=\s*\S{4,}'''
+tags = ["antiplagio", "shared-secret"]
+
+# Postgres DSNs pasted whole (host, user and password in one string).
+[[rules]]
+id = "postgres-dsn"
+description = "PostgreSQL connection string with credentials"
+regex = '''postgres(ql)?://[^:\s]+:[^@\s]+@[^\s/]+'''
+tags = ["database", "dsn"]

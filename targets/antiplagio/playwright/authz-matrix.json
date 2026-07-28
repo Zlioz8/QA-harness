@@ -1,0 +1,62 @@
+[
+  {
+    "path": "/local/antiplagiarsena/get_student_doc.php?userid=2&cmid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "full text of a learner's submitted document; only the instructor may read it"
+  },
+  {
+    "path": "/local/antiplagiarsena/get_student_results.php?userid=2&cmid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "similarity results per learner"
+  },
+  {
+    "path": "/local/antiplagiarsena/get_reports.php?cmid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "report list for the whole activity: every learner's score in one response"
+  },
+  {
+    "path": "/local/antiplagiarsena/get_data.php?cmid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "activity data including the enrolled users"
+  },
+  {
+    "path": "/local/antiplagiarsena/fix_criteria.php",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "overrides the similarity a learner is graded on — a learner must never reach it"
+  },
+  {
+    "path": "/local/antiplagiarsena/release_student.php",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "publishes a report to a learner; a learner releasing their own is self-service grading"
+  },
+  {
+    "path": "/local/antiplagiarsena/download.php?id=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "report download by numeric id — the classic IDOR: guessable, and the object is a person's document"
+  },
+  {
+    "path": "/local/antiplagiarsena/download_historico.php?cmid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "historical export for the activity"
+  },
+  {
+    "path": "/local/antiplagiarsena/cross_report.php?cmid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "cross-course matches: exposes learners from other courses"
+  },
+  {
+    "path": "/local/antiplagiarsena/get_my_report.php",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "a learner's OWN report — both roles legitimately reach this one"
+  }
+]

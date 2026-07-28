@@ -1,0 +1,14 @@
+# Trivy configuration (native). Filesystem scan of the mounted repo.
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+severity:
+  - MEDIUM
+  - HIGH
+  - CRITICAL
+# Reduce noise from third-party trees; app deps (composer.lock, package-lock) still scanned.
+skip-dirs:
+  - "**/node_modules"
+  - "**/vendor"

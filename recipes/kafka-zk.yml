@@ -1,0 +1,44 @@
+# RECIPE: Kafka + Zookeeper, for pipelines whose work is queued rather than served.
+#
+# Read this before using it: the settings below mirror what such stacks typically ship
+# (anonymous Zookeeper login, PLAINTEXT listeners). That is deliberate — the lab reproduces the
+# target's configuration, it does not silently harden it. If the audited project runs an
+# unauthenticated broker, the audit must run one too, or the finding disappears into the lab.
+#
+# What the lab DOES change: ports bind to 127.0.0.1 only. Reproducing a weak configuration is
+# evidence; exposing it to the LAN is negligence.
+services:
+  zookeeper:
+    profiles: ["runtime", "dast", "perf", "e2e"]
+    image: ${ZK_IMAGE:-bitnamilegacy/zookeeper:3.7}
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=${ZK_ANONYMOUS:-yes}
+    ports:
+      - "127.0.0.1:2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep -q imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    profiles: ["runtime", "dast", "perf", "e2e"]
+    image: ${KAFKA_IMAGE:-bitnamilegacy/kafka:3.7.0}
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=${KAFKA_PLAINTEXT:-yes}
+    ports:
+      - "127.0.0.1:9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --list --bootstrap-server localhost:9092 >/dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s

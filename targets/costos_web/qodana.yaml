@@ -1,0 +1,13 @@
+# Qodana (JetBrains) configuration — complements SonarQube with IDE-grade inspections.
+version: "1.0"
+linter: jetbrains/qodana-php:latest
+profile:
+  name: qodana.recommended
+# Do not inspect dependencies or build output.
+exclude:
+  - name: All
+    paths:
+      - vendor
+      - node_modules
+      - dist
+      - public/build

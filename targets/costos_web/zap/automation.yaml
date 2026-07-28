@@ -1,0 +1,48 @@
+# OWASP ZAP Automation Framework plan (declarative — ZAP runs it, no bash).
+# Scope: the running backend API. Unauthenticated surface here (CORS, security
+# headers, info leakage, public endpoints). Authenticated authorization is covered
+# by the Playwright flows, which drive the real session-cookie login.
+env:
+  contexts:
+    - name: costos-api
+      urls:
+        - "http://app:8000"
+      includePaths:
+        - "http://app:8000/api.*"
+        - "http://app:8000/sanctum.*"
+      excludePaths:
+        - ".*/logout"
+  parameters:
+    failOnError: true
+    progressToStdout: true
+
+jobs:
+  - type: spider
+    parameters:
+      context: costos-api
+      url: "http://app:8000/api"
+      maxDuration: 3
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  # Active scan probes for injection/misconfig on discovered endpoints.
+  - type: activeScan
+    parameters:
+      context: costos-api
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report
+    risks: [info, low, medium, high]
+
+  - type: report
+    parameters:
+      template: sarif-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report

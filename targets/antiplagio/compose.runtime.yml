@@ -1,0 +1,71 @@
+# Runtime for the antiplagio target — composed from recipes, not written from scratch.
+#
+# The stack has four moving parts and no single "the app":
+#   Moodle + plugin  the user-facing surface (instructor and learner screens, JSON endpoints)
+#   FastAPI          the machine-facing surface (the plugin posts analysis requests to it)
+#   Kafka            the queue between the API and the analyzers
+#   analyzers        the workers that actually compare documents
+#
+# Tiers, so that a constrained host still gets a valid run instead of no run:
+#   B1 (profile "runtime") — Moodle + Postgres + FastAPI. Enough for DAST, the authorization
+#                            matrix and load: everything a user or an attacker can reach.
+#   B2 (profile "pipeline") — Kafka + analyzers. Needed only to exercise the queue end to end.
+#                            Kept separate because the analyzer image is ~3 GB of scientific
+#                            Python; on a small host it is the difference between a run and none.
+#
+# Whichever tier is left out must be recorded in reports/antiplagio/RUN.md as NOT covered.
+# A dimension nobody ran and a dimension that found nothing look identical in a report folder.
+
+# include paths resolve against the PROJECT directory (the lab root), not against this file.
+include:
+  - path: ./recipes/postgres.yml
+  - path: ./recipes/moodle-plugin.yml
+  - path: ./recipes/fastapi-uvicorn.yml
+
+services:
+  # ---- B2: the queue and the workers (profile "pipeline") -------------------
+  # Same images the project itself declares in antiplagio/docker_config/docker-compose.yml.
+  # Reproduced, not corrected: the plaintext/anonymous configuration IS the finding, and
+  # hardening it here would delete the evidence. Ports stay on loopback.
+  zookeeper:
+    profiles: ["pipeline"]
+    image: bitnamilegacy/zookeeper:3.7
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc -w 2 localhost 2181 | grep -q imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    profiles: ["pipeline"]
+    image: bitnamilegacy/kafka:3.7.0
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    ports:
+      - "127.0.0.1:9092:9092"
+
+  analyzer:
+    profiles: ["pipeline"]
+    build:
+      context: ${SRC_PATH}/antiplagio/analyzer_plagiarism
+      dockerfile: Dockerfile
+    depends_on:
+      - kafka
+    environment:
+      PROCESS_STATUS_SECRET: ${PROCESS_STATUS_SECRET:-}
+    ports:
+      - "127.0.0.1:5000:5000"
+    # Declared envelope: load figures are only comparable against stated limits.
+    deploy:
+      resources:
+        limits:
+          cpus: "${PERF_CPUS:-2}"
+          memory: ${PERF_MEM:-2048m}

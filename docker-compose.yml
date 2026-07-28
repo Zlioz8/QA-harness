@@ -1,0 +1,240 @@
+# SECURITY-LAB — CORE. Only the analysis tools live here; they are project-agnostic.
+#
+# Everything that knows *what* is being audited (how the app boots, how you log in,
+# which endpoints exist, the DB seed) lives in targets/<name>/ and is layered on top:
+#
+#   docker compose --env-file targets/<name>/target.env \
+#                  -f docker-compose.yml -f targets/<name>/compose.runtime.yml ...
+#
+# The Makefile does that for you (`make <goal> TARGET=<name>`).
+#
+# Invariants this file must keep:
+#   - No project name, framework or endpoint appears below. If you need one, it
+#     belongs in a target profile.
+#   - The audited source is mounted READ-ONLY. The lab observes; it never fixes.
+#   - Published ports bind to 127.0.0.1 only (lab finding L1: the lab may hold real
+#     data, and 0.0.0.0 publishes it to the whole LAN).
+#
+# Variables consumed (all defined in targets/<name>/target.env):
+#   TARGET_NAME  SRC_PATH  SOURCE_DIRS  QODANA_IMAGE  SONAR_PORT  SONAR_TOKEN
+#   QODANA_TOKEN SEMGREP_CONFIG  BASE_URL  APP_INTERNAL_URL  ALLOWED_ORIGIN
+#   ROLE_A_USER ROLE_A_PASS ROLE_B_USER ROLE_B_PASS
+#
+# Profiles:  clone | static | dast | perf | e2e     (runtime/build come from the target)
+
+services:
+
+  # ---------- fetch (optional: prefer SRC_PATH on a checkout you already have) ----------
+  # Kept for repos you do not have locally. Mounts a DEDICATED deploy key, never the
+  # user's whole ~/.ssh (lab finding L2).
+  clone:
+    profiles: ["clone"]
+    image: alpine/git:latest
+    environment:
+      GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+    volumes:
+      - ./work:/work
+      - ${DEPLOY_KEY:-./configs/deploy_key}:/root/.ssh/id_ed25519:ro
+    command: >
+      clone --branch ${BRANCH:-main} ${REPO_URL:-} /work/${TARGET_NAME}
+
+  # ---------- static: repo-shaped. Runs on ANY project with zero knowledge of it ----------
+  sonarqube:
+    profiles: ["static"]
+    image: sonarqube:community
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    ports:
+      - "127.0.0.1:${SONAR_PORT:-9000}:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q UP"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  sonar-scanner:
+    profiles: ["static"]
+    image: sonarsource/sonar-scanner-cli:latest
+    depends_on:
+      sonarqube:
+        condition: service_healthy
+    environment:
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+    volumes:
+      - ${SRC_PATH}:/usr/src:ro
+      - ./targets/${TARGET_NAME}/sonar-project.properties:/usr/src/sonar-project.properties:ro
+      - ./reports/${TARGET_NAME}/sonar:/reports
+
+  # Linter image is chosen per target (qodana-php / qodana-python / qodana-js).
+  qodana:
+    profiles: ["static"]
+    image: ${QODANA_IMAGE:-jetbrains/qodana-php:latest}
+    environment:
+      QODANA_TOKEN: ${QODANA_TOKEN:-}
+    volumes:
+      - ${SRC_PATH}:/data/project:ro
+      - ./targets/${TARGET_NAME}/qodana.yaml:/data/project/qodana.yaml:ro
+      - ./reports/${TARGET_NAME}/qodana:/data/results
+    command: ["--save-report"]
+
+  # Polyglot SAST with taint tracking. Covers the languages Qodana does not, and finds
+  # injection/authz patterns SonarQube Community misses (raw SQL, command exec, deserialization).
+  semgrep:
+    profiles: ["static"]
+    image: semgrep/semgrep:latest
+    volumes:
+      - ${SRC_PATH}:/src:ro
+      - ./reports/${TARGET_NAME}/semgrep:/reports
+    working_dir: /src
+    # Explicit rulesets, never --config=auto: auto refuses to run with --metrics=off,
+    # i.e. it requires phoning home about the code being scanned. Not acceptable for
+    # institutional source. Override the set per target with SEMGREP_CONFIG.
+    #
+    # No --error either: like every other tool here, semgrep must not decide the verdict.
+    # `make gate` does that, from thresholds the target declares.
+    command: >
+      semgrep scan ${SEMGREP_CONFIG:---config=p/security-audit --config=p/secrets --config=p/owasp-top-ten}
+             --metrics=off --sarif --output=/reports/semgrep.sarif
+             --exclude=node_modules --exclude=vendor --exclude=.venv --exclude=__pycache__ /src
+
+  # Full git history — proves whether a rotated secret is still recoverable.
+  gitleaks:
+    profiles: ["static"]
+    image: zricethezav/gitleaks:latest
+    volumes:
+      - ${SRC_PATH}:/repo:ro
+      - ./targets/${TARGET_NAME}/gitleaks.toml:/config/gitleaks.toml:ro
+      - ./reports/${TARGET_NAME}:/reports
+    command: >
+      detect --source=/repo --config=/config/gitleaks.toml
+             --log-opts=--all --report-format=sarif
+             --report-path=/reports/gitleaks.sarif --redact --exit-code=0
+
+  trufflehog:
+    profiles: ["static"]
+    image: trufflesecurity/trufflehog:latest
+    volumes:
+      - ${SRC_PATH}:/repo:ro
+      - ./reports/${TARGET_NAME}:/reports
+    command: >
+      git file:///repo --json --no-update
+
+  # Dependency CVEs + embedded secrets in the working tree.
+  trivy:
+    profiles: ["static"]
+    image: aquasec/trivy:latest
+    volumes:
+      - ${SRC_PATH}:/repo:ro
+      - ./reports/${TARGET_NAME}/trivy:/reports
+      - trivy_cache:/root/.cache
+    command: >
+      fs --scanners vuln,secret,misconfig --format sarif
+         --output /reports/trivy-fs.sarif /repo
+
+  # Dockerfiles / compose / k8s the TARGET ships. Catches plaintext brokers, anonymous
+  # auth, 0.0.0.0 binds — the class of finding no code scanner reports.
+  trivy-config:
+    profiles: ["static"]
+    image: aquasec/trivy:latest
+    volumes:
+      - ${SRC_PATH}:/repo:ro
+      - ./reports/${TARGET_NAME}/trivy:/reports
+      - trivy_cache:/root/.cache
+    command: >
+      config --format sarif --output /reports/trivy-config.sarif /repo
+
+  # Scans a built image (the target's own, or a third-party base it pins).
+  # Usage: make image-scan TARGET=x IMAGE=repo/name:tag
+  trivy-image:
+    profiles: ["static"]
+    image: aquasec/trivy:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./reports/${TARGET_NAME}/trivy:/reports
+      - trivy_cache:/root/.cache
+    command: >
+      image --scanners vuln --format sarif
+            --output /reports/trivy-image.sarif ${IMAGE:-alpine:latest}
+
+  # SBOM + licences. Answers "what is actually shipped" independently of the manifests.
+  syft:
+    profiles: ["static"]
+    image: anchore/syft:latest
+    volumes:
+      - ${SRC_PATH}:/repo:ro
+      - ./reports/${TARGET_NAME}/sbom:/reports
+    command: >
+      scan dir:/repo -o spdx-json=/reports/sbom.spdx.json -o table=/reports/sbom.txt
+
+  # ---------- dast ----------
+  # Declarative plan; ZAP interprets it. The plan is per-target because contexts and
+  # URL patterns are project knowledge.
+  zap:
+    profiles: ["dast"]
+    image: zaproxy/zap-stable:latest
+    volumes:
+      - ./targets/${TARGET_NAME}/zap:/zap/wrk/zap:ro
+      - ./reports/${TARGET_NAME}/zap:/zap/wrk/reports
+    command: >
+      zap.sh -cmd -autorun /zap/wrk/zap/automation.yaml
+
+  # ---------- perf ----------
+  # Generator runs unconstrained on purpose: it must not compete for CPU with the
+  # system under test, which is the thing that carries declared resource limits.
+  k6:
+    profiles: ["perf"]
+    image: grafana/k6:latest
+    env_file:
+      - ./targets/${TARGET_NAME}/target.env
+    environment:
+      BASE_URL: ${APP_INTERNAL_URL}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+      ROLE_A_USER: ${ROLE_A_USER:-}
+      ROLE_A_PASS: ${ROLE_A_PASS:-}
+      ROLE_B_USER: ${ROLE_B_USER:-}
+      ROLE_B_PASS: ${ROLE_B_PASS:-}
+    volumes:
+      - ./targets/${TARGET_NAME}/k6:/scripts:ro
+      # NEVER mount at /lib: that is the container's own library directory. Shadowing it removes
+      # the dynamic loader and every binary dies with "no such file or directory" — an error that
+      # names the shell, not the mount that broke it.
+      - ./lib/k6:/seclab-lib:ro
+      - ./reports/${TARGET_NAME}/k6:/reports
+    command: ["run", "--summary-export=/reports/summary.json", "/scripts/smoke.js"]
+
+  # ---------- e2e ----------
+  # Specs come from two places: lib/specs (generic, every project) and the target's own
+  # (business logic). The auth adapter is what makes the generic ones portable.
+  playwright:
+    profiles: ["e2e"]
+    image: mcr.microsoft.com/playwright:v1.49.0-jammy
+    network_mode: host
+    # The whole target profile is handed to the specs, so a project can read its own variables
+    # (a second base URL, a shared secret, a component name) without the core having to learn
+    # their names. The explicit block below is only the part of the contract the core relies on.
+    env_file:
+      - ./targets/${TARGET_NAME}/target.env
+    environment:
+      BASE_URL: ${BASE_URL}
+      FRONTEND_URL: ${FRONTEND_URL:-}
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+      AUTH_ADAPTER: ${AUTH_ADAPTER:-none}
+      ROLE_A_USER: ${ROLE_A_USER:-}
+      ROLE_A_PASS: ${ROLE_A_PASS:-}
+      ROLE_B_USER: ${ROLE_B_USER:-}
+      ROLE_B_PASS: ${ROLE_B_PASS:-}
+    volumes:
+      - ./targets/${TARGET_NAME}/playwright:/e2e:ro
+      # /seclab-lib, not /lib — see the note on the k6 service.
+      - ./lib:/seclab-lib:ro
+      - ./reports/${TARGET_NAME}/playwright:/reports
+    working_dir: /run
+    command: >
+      sh -c "mkdir -p /run && cp -r /e2e/. /run/ && mkdir -p /run/lib && cp -r /seclab-lib/. /run/lib/ && cd /run &&
+             npm init -y >/dev/null 2>&1 &&
+             npm i -D @playwright/test@1.49.0 >/dev/null 2>&1 &&
+             npx playwright test"
+
+volumes:
+  trivy_cache:

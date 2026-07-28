@@ -1,0 +1,18 @@
+# gitleaks config — extend the default ruleset (do not replace it).
+# The default rules already catch generic API keys, AWS, private keys, etc.
+[extend]
+useDefault = true
+
+# Project-specific: Laravel APP_KEY and DB/redis passwords that appeared in the
+# committed .env (findings H3/H7). These make the history scan flag them explicitly.
+[[rules]]
+id = "laravel-app-key"
+description = "Laravel APP_KEY"
+regex = '''APP_KEY\s*=\s*base64:[A-Za-z0-9+/=]{40,}'''
+tags = ["laravel", "key"]
+
+[[rules]]
+id = "env-db-password"
+description = "DB_PASSWORD in .env"
+regex = '''DB_PASSWORD\s*=\s*.+'''
+tags = ["database", "password"]

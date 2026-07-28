@@ -1,0 +1,74 @@
+# OWASP ZAP Automation Framework plan — antiplagio.
+#
+# Two contexts because this system has two front doors with different threat models:
+#
+#   moodle-plugin : what a browser reaches. Guarded by a Moodle session; ZAP crawls it
+#                   UNAUTHENTICATED, so it covers headers, the login surface and anything
+#                   reachable without a session. The authenticated authorization matrix is
+#                   Playwright's job (lib/specs/authz-matrix.spec.ts) — do not read a clean ZAP
+#                   report as "authorization is fine", it never logged in.
+#
+#   antiplag-api  : what the plugin and the analyzers reach. No browser, no session — whoever
+#                   can route to it is inside its trust boundary. That is the interesting part:
+#                   the API's own code makes its shared-secret check optional when the secret is
+#                   unset (api_antiplagio/main.py:47).
+env:
+  contexts:
+    - name: moodle-plugin
+      urls:
+        - "http://moodle:8080"
+      includePaths:
+        - "http://moodle:8080/local/antiplagiarsena.*"
+        - "http://moodle:8080/login.*"
+      excludePaths:
+        - ".*/login/logout.php.*"      # logging ourselves out mid-scan ends the scan
+        - ".*/admin/.*"                # site administration is out of scope for this audit
+    - name: antiplag-api
+      urls:
+        - "http://api:8030"
+      includePaths:
+        - "http://api:8030.*"
+  parameters:
+    failOnError: false                 # the gate decides the verdict, not a tool's exit code
+    failOnWarning: false               # idem: a plan warning must not become a non-zero exit
+    progressToStdout: true
+
+jobs:
+  - type: spider
+    parameters:
+      context: moodle-plugin
+      url: "http://moodle:8080/local/antiplagiarsena/"
+      maxDuration: 3
+
+  - type: spider
+    parameters:
+      context: antiplag-api
+      # A real route, not "/": this API has no root handler, and a spider seeded on a 404
+      # crawls nothing while reporting a plan warning.
+      url: "http://api:8030/health"
+      maxDuration: 2
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  # Active scanning probes for injection and misconfiguration on what the spider found.
+  # Kept off the Moodle context: an active scan against a CMS mostly rediscovers the CMS.
+  - type: activeScan
+    parameters:
+      context: antiplag-api
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report
+    risks: [info, low, medium, high]
+
+  - type: report
+    parameters:
+      template: sarif-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report

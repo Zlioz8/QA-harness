@@ -1,0 +1,68 @@
+# RECIPE: a Moodle that hosts a plugin under audit.
+#
+# Why this recipe exists at all: a Moodle plugin has NO entry point of its own. Its files are
+# meaningless outside a Moodle installation — there is nothing to `serve`. Every dynamic
+# dimension (DAST, authz, load) therefore needs a host application brought up around it.
+# That is the general case of the hardest input the lab asks for: "how does this thing run?"
+#
+# The plugin is mounted READ-ONLY into the host Moodle's plugin directory. Moodle's own
+# upgrade step then creates the plugin's tables — we do not hand-write its schema, because a
+# hand-written schema is a fiction the audit would then be measuring.
+services:
+  moodle:
+    profiles: ["runtime", "dast", "perf", "e2e"]
+    image: ${MOODLE_IMAGE:-bitnamilegacy/moodle:4.5}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MOODLE_DATABASE_TYPE: pgsql
+      MOODLE_DATABASE_HOST: db
+      MOODLE_DATABASE_PORT_NUMBER: "5432"
+      MOODLE_DATABASE_NAME: ${DB_NAME}
+      MOODLE_DATABASE_USER: ${DB_USER}
+      MOODLE_DATABASE_PASSWORD: ${DB_PASSWORD}
+      # Lab-only administrator. Role A/B are the accounts the audit actually drives; this one
+      # exists so the install can complete and so seeding can be scripted.
+      MOODLE_USERNAME: ${MOODLE_ADMIN_USER:-labadmin}
+      MOODLE_PASSWORD: ${MOODLE_ADMIN_PASS:-Lab-Admin-2026!}
+      MOODLE_EMAIL: labadmin@lab.local
+      MOODLE_SITE_NAME: ${TARGET_NAME} audit lab
+      MOODLE_SKIP_BOOTSTRAP: "no"
+      ALLOW_EMPTY_PASSWORD: "no"
+      BITNAMI_DEBUG: "true"
+      # Read by the post-init hook that installs the plugin.
+      PLUGIN_TYPE: ${PLUGIN_TYPE:-local}
+      PLUGIN_DIR: ${PLUGIN_DIR}
+      PLUGIN_COMPONENT: ${PLUGIN_COMPONENT:-}
+    volumes:
+      # The plugin source is mounted OUTSIDE the Moodle tree, read-only, and copied in later.
+      #
+      # Why not mount it straight into local/<dir>: the Moodle image relocates its own tree into
+      # the persistence volume during setup, deleting and rewriting files as it goes. A read-only
+      # bind inside that tree makes setup fail with "Read-only file system", and a writable one
+      # would let the installation modify the audited source — which this lab never does.
+      # Two mounts inside the Moodle tree are also a trap: a non-empty persistence directory makes
+      # the image believe a Moodle is already installed, so it skips bootstrap and dies looking
+      # for config.php.
+      - ${SRC_PATH}/${PLUGIN_SUBDIR}:/plugin-src:ro
+      # Relative to THIS file's directory (see the note in postgres.yml).
+      - ./moodle-plugin-install.sh:/docker-entrypoint-init.d/10-install-plugin.sh:ro
+      - moodle_data:/bitnami/moodledata
+      - moodle_code:/bitnami/moodle
+    ports:
+      - "127.0.0.1:${MOODLE_PORT:-8081}:8080"
+    # NOTE: do not set `command:` here. The entrypoint runs the Moodle installation only when the
+    # command is its own run.sh; overriding it skips setup entirely and the container then fails
+    # in Apache, several layers away from the real cause. Plugin installation goes through the
+    # image's post-init hook instead (see the mount above).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/login/index.php >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 300s   # a first-boot Moodle install is slow; do not mistake it for a hang
+
+volumes:
+  moodle_data:
+  moodle_code:
