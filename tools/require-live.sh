@@ -15,7 +15,7 @@ ENVFILE="targets/$TARGET/target.env"
 [ -f "$ENVFILE" ] || { echo "no $ENVFILE"; exit 2; }
 
 # Never source a target profile: values contain spaces, and a profile is data, not code.
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed 's/^"//; s/"$//'; }
+envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
 
 BASE_URL=$(envget BASE_URL)
 HEALTH_PATH=$(envget HEALTH_PATH)
@@ -38,7 +38,10 @@ EOF
 fi
 
 URL="${BASE_URL%/}${HEALTH_PATH}"
-CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$URL" 2>/dev/null)
+# -k: local deployments routinely serve a self-signed cert (the stack's own nginx does). Every
+# scanner in this lab already sets ignoreHTTPSErrors; the liveness probe must match, or a healthy
+# https app reads as "nothing answered" (000) and the whole live pipeline aborts on a cert.
+CODE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "$URL" 2>/dev/null)
 
 if [ "$CODE" = "200" ]; then
   echo "live check: $URL -> 200"

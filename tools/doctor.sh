@@ -17,7 +17,7 @@ docker compose version >/dev/null 2>&1 && ok "compose: $(docker compose version 
 # Read target.env WITHOUT sourcing it. Sourcing breaks on any unquoted value containing
 # spaces (a path like /opt/MANUALES DE DESPLIEGUE/... silently becomes a command), and it
 # would also execute whatever a target profile happens to contain.
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" | tail -1 | sed 's/^"//; s/"$//'; }
+envget() { sed -n "s/^${1}=//p" "$ENVFILE" | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
 SRC_PATH=$(envget SRC_PATH)
 ROLE_A_USER=$(envget ROLE_A_USER); ROLE_B_USER=$(envget ROLE_B_USER)
 AUTH_ADAPTER=$(envget AUTH_ADAPTER); HEALTH_PATH=$(envget HEALTH_PATH); BASE_URL=$(envget BASE_URL)

@@ -47,10 +47,15 @@ services:
     ports:
       - "127.0.0.1:${SONAR_PORT:-9000}:9000"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q UP"]
+      # The sonarqube image ships curl, not wget — a wget-based check is always "unhealthy",
+      # which blocks sonar-scanner's depends_on service_healthy even though the server is UP.
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/api/system/status | grep -q UP"]
       interval: 10s
       timeout: 5s
       retries: 30
+      # SonarQube cold-boots ES + web + CE in ~2 min; without a start_period the early failing
+      # probes exhaust retries (or the dependent aborts) before it is ever ready.
+      start_period: 180s
 
   sonar-scanner:
     profiles: ["static"]
@@ -63,8 +68,13 @@ services:
       SONAR_TOKEN: ${SONAR_TOKEN:-}
     volumes:
       - ${SRC_PATH}:/usr/src:ro
-      - ./targets/${TARGET_NAME}/sonar-project.properties:/usr/src/sonar-project.properties:ro
+      # Config OUTSIDE the read-only source: nesting it at /usr/src/sonar-project.properties
+      # fails ("read-only file system") on any repo that does not already ship the file at its
+      # root — docker cannot create the mountpoint inside a ro mount. -Dproject.settings points
+      # the scanner at it; projectBaseDir stays /usr/src so sonar.sources=. resolves correctly.
+      - ./targets/${TARGET_NAME}/sonar-project.properties:/opt/scan/sonar-project.properties:ro
       - ./reports/${TARGET_NAME}/sonar:/reports
+    command: ["-Dproject.settings=/opt/scan/sonar-project.properties", "-Dsonar.projectBaseDir=/usr/src"]
 
   # Linter image is chosen per target (qodana-php / qodana-python / qodana-js).
   qodana:
@@ -74,9 +84,17 @@ services:
       QODANA_TOKEN: ${QODANA_TOKEN:-}
     volumes:
       - ${SRC_PATH}:/data/project:ro
-      - ./targets/${TARGET_NAME}/qodana.yaml:/data/project/qodana.yaml:ro
+      # Config lives OUTSIDE the read-only source. Nesting it at /data/project/qodana.yaml
+      # fails ("read-only file system") on any audited repo that does not already ship a
+      # qodana.yaml at its root — docker cannot create the mountpoint inside a ro mount.
+      # --config points qodana at it instead, which needs no writable spot in the source.
+      - ./targets/${TARGET_NAME}/qodana.yaml:/data/conf/qodana.yaml:ro
       - ./reports/${TARGET_NAME}/qodana:/data/results
-    command: ["--save-report"]
+    # --project-dir points qodana at the sub-repo to inspect. Qodana requires a git repo at the
+    # project dir (it fails "not a git repository" otherwise), so a workspace whose root is not a
+    # repo but whose CHILDREN are (movil = zajuna-frontend + zajuna-backend) must name one via
+    # QODANA_SUBDIR in target.env. Single-repo targets leave it unset and inspect the root ".".
+    command: ["--save-report", "--config", "/data/conf/qodana.yaml", "--project-dir", "/data/project/${QODANA_SUBDIR:-.}"]
 
   # Polyglot SAST with taint tracking. Covers the languages Qodana does not, and finds
   # injection/authz patterns SonarQube Community misses (raw SQL, command exec, deserialization).
@@ -191,6 +209,11 @@ services:
   k6:
     profiles: ["perf"]
     image: grafana/k6:latest
+    # The grafana/k6 image runs as uid 12345; the reports directory is pre-created by the host
+    # user (see the Makefile guard), so an unprivileged k6 cannot write its --summary-export and
+    # the run dies with "permission denied". Run as root like the other tool containers (trivy,
+    # semgrep): it only writes into the mounted reports dir, which the host still owns.
+    user: "0:0"
     # See the note on the zap service: lets APP_INTERNAL_URL point at a deployment running
     # on the host rather than at a container the lab started.
     extra_hosts:

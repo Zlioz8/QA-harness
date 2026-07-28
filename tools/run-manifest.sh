@@ -13,7 +13,7 @@ ENVFILE="targets/$TARGET/target.env"
 # spaces — a path like /opt/MANUALES DE DESPLIEGUE/... silently becomes a command, SRC_PATH ends
 # up empty, and the manifest then records "(not a git checkout)" for a perfectly normal git repo.
 # A manifest that misreports which commit was audited is worse than no manifest.
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed 's/^"//; s/"$//'; }
+envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
 SRC_PATH=$(envget SRC_PATH)
 PERF_CPUS=$(envget PERF_CPUS)
 PERF_MEM=$(envget PERF_MEM)

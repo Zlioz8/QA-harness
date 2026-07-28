@@ -127,6 +127,38 @@ const basic: AuthAdapter = {
   },
 };
 
+// ---- Zajuna mobile API (JSON login by document, returns a bearer token) ----
+// Custom login shape: POST /auth/login {type_document, document, password} -> {access_token}.
+// ROLE_*_USER holds the document number; type is CC unless DOC_TYPE overrides. The token then
+// travels as Authorization: Bearer on every request, like jwt-bearer with a different login body.
+const zajuna: AuthAdapter = {
+  name: 'zajuna',
+  async loginAs(role) {
+    const path = process.env.LOGIN_PATH || '/auth/login';
+    const tmp = await newCtx();
+    // Absolute url (BASE may carry a path prefix like /mobile/api that a leading-slash path
+    // would drop when Playwright resolves it against the origin).
+    const res = await tmp.post(`${BASE}${path}`, {
+      data: {
+        type_document: process.env.DOC_TYPE || 'CC',
+        document: CREDS[role].user,
+        password: CREDS[role].pass,
+      },
+    });
+    if (res.status() !== 200) throw new Error(`zajuna login failed for role ${role}: ${res.status()}`);
+    const token = (await res.json()).access_token;
+    if (!token) throw new Error('zajuna login: no access_token in response');
+    return pwRequest.newContext({
+      baseURL: BASE,
+      extraHTTPHeaders: { Authorization: `Bearer ${token}`, ...(ORIGIN ? { Origin: ORIGIN } : {}) },
+      ignoreHTTPSErrors: true,
+    });
+  },
+  async writeHeaders() {
+    return {};
+  },
+};
+
 // Unauthenticated. Legitimate for a public surface — but the authorization specs will
 // skip, and skipping must be visible in RUN.md rather than read as "passed".
 const none: AuthAdapter = {
@@ -143,6 +175,7 @@ const ADAPTERS: Record<string, AuthAdapter> = {
   sanctum,
   'moodle-session': moodleSession,
   'jwt-bearer': jwtBearer,
+  zajuna,
   basic,
   none,
 };

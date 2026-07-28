@@ -11,7 +11,7 @@ R="reports/$TARGET"
 ENVFILE="targets/$TARGET/target.env"
 # Read thresholds WITHOUT sourcing: a value containing spaces would be executed as a command
 # (see the note in run-manifest.sh), and a target profile is data, not code.
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed 's/^"//; s/"$//'; }
+envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
 ALLOW_SECRETS=$(envget ALLOW_SECRETS)
 MAX_DEP_FINDINGS=$(envget MAX_DEP_FINDINGS)
 MAX_SAST_FINDINGS=$(envget MAX_SAST_FINDINGS)

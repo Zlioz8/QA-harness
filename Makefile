@@ -65,9 +65,8 @@ clone: guard      ##[code] fetch REPO_URL@BRANCH into work/$(TARGET) (only if SR
 	$(DC) --profile clone run --rm clone
 
 # ---- static analysis: works with NO running app ----
-secrets: guard    ##[code] gitleaks + trufflehog over the full git history
-	$(DC) --profile static run --rm gitleaks
-	$(DC) --profile static run --rm trufflehog
+secrets: guard    ##[code] gitleaks + trufflehog: every repo's history + a working-tree pass
+	@tools/secrets.sh "$(TARGET)"
 
 deps: guard       ##[code] Trivy filesystem scan (dependency CVEs + secrets + misconfig)
 	$(DC) --profile static run --rm trivy

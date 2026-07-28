@@ -17,9 +17,12 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 // This file lives at lib/specs/, so the adapter is one directory up.
-import { loginAs, hasRole, Role } from '../auth/index';
+import { loginAs, hasRole, Role, BASE } from '../auth/index';
 
-type Rule = { path: string; method?: string; allow: Role[]; note?: string };
+// `body` is optional: GET rules omit it (antiplagio-style path+query); JSON APIs whose
+// authorization lives on POST endpoints supply it so the request is well-formed and the
+// status reflects authorization, not a 422 for a missing payload.
+type Rule = { path: string; method?: string; allow: Role[]; note?: string; body?: unknown };
 
 const FILE = 'authz-matrix.json';
 const rules: Rule[] = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : [];
@@ -34,7 +37,17 @@ test.describe('authorization matrix', () => {
       const should = rule.allow.includes(role);
       test(`${method} ${rule.path} — role ${role} ${should ? 'allowed' : 'denied'}${rule.note ? ` (${rule.note})` : ''}`, async () => {
         const ctx = await loginAs(role);
-        const res = await ctx.fetch(rule.path, { method });
+        // Build an ABSOLUTE url instead of trusting Playwright's baseURL join: an absolute
+        // path ("/grades/x") resolves against the ORIGIN and silently drops a baseURL path
+        // prefix (https://host/mobile/api -> https://host/grades/x -> 404). Concatenation
+        // keeps the prefix, and is correct for path-less bases too (http://moodle:8080 + /x).
+        const url = /^https?:\/\//.test(rule.path) ? rule.path : `${BASE}${rule.path}`;
+        const res = await ctx.fetch(url, {
+          method,
+          ...(rule.body !== undefined
+            ? { data: rule.body, headers: { 'Content-Type': 'application/json' } }
+            : {}),
+        });
         if (should) {
           expect(res.status(), 'legitimate access must not be blocked').toBeLessThan(400);
         } else {
