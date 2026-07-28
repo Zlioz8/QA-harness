@@ -72,5 +72,23 @@ fi
 mkdir -p "reports/$TARGET" 2>/dev/null
 [ -w "reports/$TARGET" ] && ok "reports/$TARGET writable" || bad "reports/$TARGET not writable"
 
+# --- which rung of the ladder, and what that leaves blocked ---------------------------------
+echo
+TIER_OUT=$(tools/tier.sh "$TARGET" 2>/dev/null)
+TIER=$(echo "$TIER_OUT" | sed -n 's/^TIER=//p')
+LIVE=$(echo "$TIER_OUT" | sed -n 's/^LIVE=//p')
+case "${TIER:-0}" in
+  1) echo "  rung 1 — source only. Everything under 'make static' is available right now."
+     echo "           Point BASE_URL/HEALTH_PATH at your own deployment to unlock DAST," ;
+     echo "           authorization and load. You do not need a recipe for that." ;;
+  2) echo "  rung 2 — source + your own deployment (the lab points at it, never manages it)." ;;
+  3) echo "  rung 3 — source + a runtime recipe: the lab brings the app up itself, ephemeral." ;;
+  *) echo "  rung 0 — not analysable yet." ;;
+esac
+[ "${LIVE:-}" = "ok" ] && ok "the application answers: every [live] dimension is available"
+echo "$TIER_OUT" | sed -n 's/^BLOCKED=//p' | while IFS='|' read -r goal reason; do
+  warn "blocked: $goal — $reason"
+done
+
 echo
 [ "$FAIL" -eq 0 ] && echo "preflight passed" || { echo "preflight FAILED"; exit 1; }

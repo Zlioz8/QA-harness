@@ -32,6 +32,47 @@ existen, qué rol puede alcanzar qué).
 
 ---
 
+## Qué tienes que traer (la escalera)
+
+**El laboratorio no instala tu aplicación.** Hay tres peldaños y cada uno desbloquea más:
+
+| Peldaño | Qué aportas | Qué se desbloquea |
+|---|---|---|
+| **1** | un checkout del código | secretos · CVE · configuración · SAST · SBOM · calidad |
+| **2** | + **tu** despliegue (URL + 2 cuentas) | + DAST · autorización · flujos · carga |
+| **3** | + una receta de arranque | lo mismo, pero efímero y reproducible |
+
+El peldaño 1 no necesita desplegar nada: con la ruta al código ya produce hallazgos. El **2 es el
+caso normal**: tu aplicación corre donde sea que la despliegues y el laboratorio le apunta — no la
+levanta ni la administra, y no hace falta escribir ningún `compose.runtime.yml`. El 3 solo se usa
+cuando quieres repetibilidad exacta o no depender de que alguien mantenga un despliegue vivo.
+
+`make doctor TARGET=<perfil>` te dice en qué peldaño estás y qué queda bloqueado.
+
+Los objetivos están etiquetados según lo que necesitan, y `make help` los agrupa:
+
+- **`[code]`** — solo el checkout.
+- **`[live]`** — la aplicación respondiendo. Abortan con una explicación si no lo está: un reporte
+  de ZAP limpio contra una aplicación caída es idéntico a uno contra una aplicación segura.
+- **`[admin]`** — mantenimiento.
+
+## Interfaz web
+
+```bash
+make ui        # http://127.0.0.1:7777
+```
+
+Alta de proyectos, ejecución con log en vivo, configuración por formulario y captura de triaje.
+
+> **Solo para el operador, en `127.0.0.1`.** Tiene el socket de Docker: quien alcance ese puerto
+> ejecuta contenedores arbitrarios, es decir, root en este equipo. `make ui` verifica el
+> confinamiento al arrancar y **apaga la interfaz** si alguna vez queda publicada más allá de
+> loopback. Compartirla por red exigiría autenticación, permisos por rol, auditoría y custodia de
+> credenciales — deliberadamente no construidos.
+
+Si tu código vive fuera del directorio padre del laboratorio, indícalo:
+`make ui SRC_MOUNT=/home/dev/repos`.
+
 ## Dar de alta un proyecto
 
 ```bash
@@ -42,16 +83,20 @@ make doctor TARGET=proyecto_x            # preflight: docker, disco, puertos, pe
 make static TARGET=proyecto_x            # YA produce hallazgos, sin levantar nada
 ```
 
-Para las dimensiones dinámicas hay que aportar además:
+Para las dimensiones dinámicas (peldaño 2) hay que aportar además:
 
-- `compose.runtime.yml` componiendo recetas (`include:` — rutas relativas al **directorio del
-  proyecto**), que debe responder 200 en `HEALTH_PATH`.
+- `BASE_URL` y `HEALTH_PATH`: dónde responde **tu** despliegue y cómo saber que está vivo. Si
+  corre en este mismo equipo, `APP_INTERNAL_URL=http://host.docker.internal:<puerto>` — dentro de
+  la red del compose, «localhost» es el contenedor de la herramienta, no tu máquina.
 - `AUTH_ADAPTER` y **dos cuentas de distinto privilegio** (`ROLE_A_*`, `ROLE_B_*`).
 - `playwright/authz-matrix.json`: qué rol puede alcanzar qué. **Ninguna herramienta lo sabe.**
 - Un escenario sembrado (los datos sobre los que la operación autorizada sí funciona).
 
+Solo si quieres el peldaño 3 escribes `compose.runtime.yml`, componiendo `recipes/` con `include:`
+(rutas relativas al **directorio del proyecto**).
+
 ```bash
-make up TARGET=proyecto_x
+make up TARGET=proyecto_x                # solo en el peldaño 3
 make e2e dast perf TARGET=proyecto_x
 make run-manifest TARGET=proyecto_x      # reports/proyecto_x/RUN.md: cobertura real
 make gate         TARGET=proyecto_x      # veredicto: sale != 0 si se incumplen umbrales
@@ -98,12 +143,16 @@ Tres decisiones deliberadas de esa página:
 | Autorización y flujos | Playwright | `make e2e` | **sí** |
 | Carga | k6 | `make perf` | **sí** |
 
+`make static` corre todo lo `[code]`; `make live`, todo lo `[live]`.
+
 ---
 
 ## Lo que el laboratorio NO hace
 
 Está escrito aquí porque es el modo de fallo más probable de esta herramienta: leerla como un botón.
 
+- **No instala tu aplicación.** Ver la escalera arriba: con el código solo ya analiza; para medir
+  en vivo le apuntas a tu despliegue.
 - **No conoce la política de autorización.** Un `200` sólo es hallazgo si la política decía `403`.
   Esa política la escribe una persona en `authz-matrix.json`.
 - **No tría.** Un hallazgo de dependencia no es un riesgo hasta que alguien evalúa alcanzabilidad.
@@ -112,7 +161,11 @@ Está escrito aquí porque es el modo de fallo más probable de esta herramienta
 - **No distingue un fallo del proyecto de uno del entorno.** Si SonarQube no corrió por falta de
   disco, eso no dice nada sobre el proyecto.
 - **`skip` no es `PASS`.** `make gate` lo imprime y `RUN.md` lo registra. Una dimensión que no se
-  ejecutó nunca debe leerse como aprobada.
+  ejecutó nunca debe leerse como aprobada. Y **`NO DISPONIBLE` no es `NO EJECUTADO`**: lo primero
+  es que este perfil aún no puede medirlo; lo segundo, que podía y no se hizo.
+- **No tría por ti, pero sí guarda tu triaje.** En la interfaz marcas cada hallazgo como
+  confirmado / falso positivo / inconcluso con su razón, y eso viaja al informe. Sin ese paso, el
+  razonamiento se pierde en cuanto cierras la sesión.
 
 Detalle completo, con la evidencia de la corrida que lo demostró, en
 [`INFORME_MIGRACION_SECURITY_LAB.md`](INFORME_MIGRACION_SECURITY_LAB.md).

@@ -26,6 +26,10 @@ import subprocess
 import sys
 from datetime import datetime
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import style     # shared with the web UI: the report and the interface are one product
+import triage    # human verdicts recorded in the UI, shown here
+
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # ---------------------------------------------------------------- data loading
@@ -89,7 +93,7 @@ def severity_of(result, rule):
     return "unranked"
 
 
-def load_sarif(path):
+def load_sarif(path, tool=""):
     """-> {'count': n, 'sev': {...}, 'findings': [...]} or None when the file is absent.
 
     None means NOT RUN and is rendered as such. It is never coerced to zero."""
@@ -111,6 +115,7 @@ def load_sarif(path):
                 loc = phys.get("artifactLocation", {}).get("uri", "")
                 line = phys.get("region", {}).get("startLine", "")
             out["findings"].append({
+                "tool": tool,
                 "rule": res.get("ruleId", "?"),
                 "name": (rule.get("name") or rule.get("shortDescription", {}).get("text") or ""),
                 "sev": sev,
@@ -167,6 +172,28 @@ def load_k6(path):
     return out or None
 
 
+def run_tier(target, root):
+    """Which rung the profile is on — from tools/tier.sh, never recomputed here.
+
+    Lets the coverage table separate "you could have run this and did not" from "this is not
+    available yet at your rung". They look identical in a reports folder and mean opposite
+    things: the first is an omission, the second is simply where the project stands.
+    """
+    try:
+        proc = subprocess.run(["tools/tier.sh", target], cwd=root, capture_output=True,
+                              text=True, timeout=60)
+        out = ANSI.sub("", proc.stdout)
+    except Exception:
+        return 1
+    for line in out.splitlines():
+        if line.startswith("TIER="):
+            try:
+                return int(line[5:])
+            except ValueError:
+                return 1
+    return 1
+
+
 def run_gate(target, root):
     """Single source of truth for the verdict: ask gate.sh rather than reimplement it."""
     try:
@@ -188,73 +215,6 @@ def run_gate(target, root):
 
 E = html.escape
 
-CSS = """
-:root{--bg:#fff;--fg:#1a1d21;--muted:#5c6570;--line:#e2e6ea;--card:#fff;--accent:#0b5fff;
---crit:#b3001b;--high:#d4380d;--med:#b06a00;--low:#3d7a3d;--unranked:#6b7280;
---pass:#1a7f37;--fail:#b3001b;--skip:#6b7280;--shadow:0 1px 3px rgba(0,0,0,.06)}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1216;--fg:#e6e9ee;--muted:#9aa4b1;
---line:#242a31;--card:#151a20;--crit:#ff6b6b;--high:#ff9151;--med:#ffc75a;--low:#6ee7a8;
---unranked:#9aa4b1;--pass:#4ade80;--fail:#ff6b6b;--shadow:none}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,
-"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-.wrap{max-width:1080px;margin:0 auto;padding:32px 20px 72px}
-h1{font-size:26px;margin:0 0 4px;font-weight:650;letter-spacing:-.02em}
-h2{font-size:18px;margin:36px 0 12px;font-weight:620;letter-spacing:-.01em}
-.sub{color:var(--muted);font-size:13.5px;margin-bottom:24px}
-.sub code{background:var(--line);padding:1px 6px;border-radius:4px;font-size:12.5px}
-.verdict{display:flex;align-items:center;gap:14px;padding:18px 20px;border-radius:10px;
-border:1px solid var(--line);background:var(--card);box-shadow:var(--shadow);margin-bottom:8px}
-.badge{font-size:19px;font-weight:700;letter-spacing:.02em;padding:6px 14px;border-radius:7px;color:#fff}
-.badge.FAILED{background:var(--fail)}.badge.PASSED{background:var(--pass)}
-.badge.UNKNOWN{background:var(--skip)}
-.vtext{color:var(--muted);font-size:13.5px}
-.gate{list-style:none;padding:0;margin:14px 0 0;display:grid;gap:6px}
-.gate li{display:flex;gap:10px;align-items:baseline;font-size:14px;padding:7px 12px;
-border:1px solid var(--line);border-radius:7px;background:var(--card)}
-.tag{font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;color:#fff;min-width:42px;
-text-align:center;letter-spacing:.03em}
-.tag.PASS{background:var(--pass)}.tag.FAIL{background:var(--fail)}.tag.skip{background:var(--skip)}
-table{width:100%;border-collapse:collapse;font-size:14px;background:var(--card);
-border:1px solid var(--line);border-radius:9px;overflow:hidden}
-th,td{text-align:left;padding:10px 13px;border-bottom:1px solid var(--line)}
-th{font-weight:620;font-size:12.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-tr:last-child td{border-bottom:none}
-.num{font-variant-numeric:tabular-nums;text-align:right}
-.ran-yes{color:var(--pass);font-weight:600}
-.ran-no{color:var(--fail);font-weight:700}
-.sevbar{display:flex;height:9px;border-radius:5px;overflow:hidden;background:var(--line);min-width:130px}
-.sevbar i{display:block;height:100%}
-.s-critical{background:var(--crit)}.s-high{background:var(--high)}.s-medium{background:var(--med)}
-.s-low{background:var(--low)}.s-unranked{background:var(--unranked)}
-.chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 0}
-.chip{font-size:12px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
-.chip b{color:var(--fg);font-variant-numeric:tabular-nums}
-details{border:1px solid var(--line);border-radius:9px;margin:10px 0;background:var(--card);
-overflow:hidden}
-summary{cursor:pointer;padding:13px 16px;font-weight:600;font-size:14.5px;display:flex;
-justify-content:space-between;align-items:center;gap:12px;user-select:none}
-summary::-webkit-details-marker{display:none}
-summary:after{content:"›";transform:rotate(90deg);color:var(--muted);font-size:17px;transition:.15s}
-details[open] summary:after{transform:rotate(-90deg)}
-.body{padding:0 16px 14px;border-top:1px solid var(--line)}
-.f{padding:11px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
-.f:last-child{border-bottom:none}
-.f .top{display:flex;gap:9px;align-items:baseline;flex-wrap:wrap}
-.f .rule{font-weight:600}
-.f .loc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--muted);
-word-break:break-all}
-.f .msg{color:var(--muted);margin-top:3px}
-.sev{font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:4px;color:#fff;letter-spacing:.03em}
-.sev.critical{background:var(--crit)}.sev.high{background:var(--high)}
-.sev.medium{background:var(--med)}.sev.low{background:var(--low)}.sev.unranked{background:var(--unranked)}
-.note{border-left:3px solid var(--accent);background:var(--card);padding:13px 16px;
-border-radius:0 8px 8px 0;font-size:13.5px;color:var(--muted);margin:14px 0}
-.note b{color:var(--fg)}
-.more{color:var(--muted);font-size:12.5px;padding:9px 0 2px}
-a{color:var(--accent)}
-footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
-"""
 
 
 def sev_bar(sev):
@@ -273,19 +233,29 @@ def sev_chips(sev):
     return f'<div class="chips">{chips}</div>' if chips else ""
 
 
-def findings_block(data, limit=25):
+def findings_block(data, limit=25, verdicts=None):
+    verdicts = verdicts or {}
     rows = []
     for f in data["findings"][:limit]:
+        judged = verdicts.get(triage.key_for(f.get("tool", ""), f["rule"], f["loc"]))
         loc = f'{E(f["loc"])}:{f["line"]}' if f["loc"] else ""
         # Several tools set `name` to the rule id verbatim (semgrep does). Printing both just
         # doubles a long identifier and pushes the actual message out of view.
         show_name = f["name"] and f["name"] != f["rule"]
         name = f' <span class="rule">{E(f["name"])}</span>' if show_name else ""
+        mark, note = "", ""
+        if judged:
+            v = judged.get("verdict", "")
+            if v:
+                mark = (f'<span class="verdictline {E(v)}">'
+                        f'{E(triage.LABELS.get(v, v))}</span>')
+            if judged.get("note"):
+                note = f'<div class="triage">{E(judged["note"])}</div>'
         rows.append(
             f'<div class="f"><div class="top"><span class="sev {f["sev"]}">{f["sev"].upper()}</span>'
-            f'<span class="rule">{E(f["rule"])}</span>{name}</div>'
+            f'{mark}<span class="rule">{E(f["rule"])}</span>{name}</div>'
             f'<div class="loc">{loc}</div>'
-            f'<div class="msg">{E(f["msg"])}</div></div>'
+            f'<div class="msg">{E(f["msg"])}</div>{note}</div>'
         )
     if data["count"] > limit:
         rows.append(f'<div class="more">… y {data["count"] - limit} más. '
@@ -298,18 +268,23 @@ def build(target, root):
     env = os.path.join(root, "targets", target, "target.env")
 
     gate = run_gate(target, root)
+    verdicts = triage.load(rep)
+    tier = run_tier(target, root)
+    # Dimensions that need a live application, so they can be reported as
+    # unavailable rather than as skipped when the profile is still on rung 1.
+    live_dims = {'Superficie runtime (DAST)', 'Autorización y flujos', 'Carga'}
 
     dims = [
-        ("Secretos en la historia git", "gitleaks", load_sarif(f"{rep}/gitleaks.sarif"),
+        ("Secretos en la historia git", "gitleaks", load_sarif(f"{rep}/gitleaks.sarif", "gitleaks"),
          "gitleaks.sarif"),
-        ("Dependencias / CVE", "Trivy fs", load_sarif(f"{rep}/trivy/trivy-fs.sarif"),
+        ("Dependencias / CVE", "Trivy fs", load_sarif(f"{rep}/trivy/trivy-fs.sarif", "trivy-fs"),
          "trivy/trivy-fs.sarif"),
         ("Configuración de contenedores", "Trivy config",
-         load_sarif(f"{rep}/trivy/trivy-config.sarif"), "trivy/trivy-config.sarif"),
-        ("CVE de imágenes", "Trivy image", load_sarif(f"{rep}/trivy/trivy-image.sarif"),
+         load_sarif(f"{rep}/trivy/trivy-config.sarif", "trivy-config"), "trivy/trivy-config.sarif"),
+        ("CVE de imágenes", "Trivy image", load_sarif(f"{rep}/trivy/trivy-image.sarif", "trivy-image"),
          "trivy/trivy-image.sarif"),
-        ("SAST", "semgrep", load_sarif(f"{rep}/semgrep/semgrep.sarif"), "semgrep/semgrep.sarif"),
-        ("Superficie runtime (DAST)", "OWASP ZAP", load_sarif(f"{rep}/zap/zap-report.json"),
+        ("SAST", "semgrep", load_sarif(f"{rep}/semgrep/semgrep.sarif", "semgrep"), "semgrep/semgrep.sarif"),
+        ("Superficie runtime (DAST)", "OWASP ZAP", load_sarif(f"{rep}/zap/zap-report.json", "zap"),
          "zap/zap-report.html"),
     ]
     pw = load_playwright(f"{rep}/playwright/results.json")
@@ -330,7 +305,7 @@ def build(target, root):
 
     parts = [f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QA-harness · {E(target)}</title><style>{CSS}</style></head><body><div class="wrap">
+<title>QA-harness · {E(target)}</title><style>{style.css(style.REPORT)}</style></head><body><div class="wrap">
 <h1>QA-harness · {E(target)}</h1>
 <div class="sub">Fuente <code>{E(src)}</code> · commit <code>{E(commit[:60])}</code>
  · generado {datetime.now().strftime('%Y-%m-%d %H:%M')}</div>"""]
@@ -351,30 +326,42 @@ def build(target, root):
         parts.append(f'<ul class="gate">{items}</ul>')
     parts.append('<div class="note"><b>skip no es PASS.</b> Una dimensión que no se ejecutó '
                  'nunca debe leerse como aprobada: significa que no hay información, no que no '
-                 'haya hallazgos.</div>')
+                 'haya hallazgos. <b>NO DISPONIBLE</b> es distinto de <b>NO EJECUTADO</b>: lo '
+                 'primero es que este perfil aún no puede medirlo (falta indicar dónde responde '
+                 'la aplicación); lo segundo es que podía y no se hizo.</div>')
 
     # ---- coverage
     parts.append("<h2>Cobertura</h2><table><tr><th>Dimensión</th><th>Herramienta</th>"
                  '<th class="num">Hallazgos</th><th>Severidad</th><th>Ejecutado</th></tr>')
     for title, tool, data, _ in dims:
         if data is None:
+            na = tier < 2 and title in live_dims
+            cell = ('<td class="ran-na" title="Requiere una aplicación respondiendo">'
+                    'NO DISPONIBLE</td>' if na else '<td class="ran-no">NO EJECUTADO</td>')
             parts.append(f'<tr><td>{E(title)}</td><td>{E(tool)}</td><td class="num">—</td>'
-                         f'<td></td><td class="ran-no">NO EJECUTADO</td></tr>')
+                         f'<td></td>{cell}</tr>')
         else:
             parts.append(f'<tr><td>{E(title)}</td><td>{E(tool)}</td>'
                          f'<td class="num">{data["count"]}</td><td>{sev_bar(data["sev"])}</td>'
                          f'<td class="ran-yes">sí</td></tr>')
     if pw is None:
-        parts.append('<tr><td>Autorización y flujos</td><td>Playwright</td><td class="num">—</td>'
-                     '<td></td><td class="ran-no">NO EJECUTADO</td></tr>')
+        cell = ('<td class="ran-na">NO DISPONIBLE</td>' if tier < 2
+                else '<td class="ran-no">NO EJECUTADO</td>')
+        parts.append('<tr><td>Autorización y flujos</td><td>Playwright</td>'
+                     f'<td class="num">—</td><td></td>{cell}</tr>')
     else:
         t = pw["tally"]
         parts.append(f'<tr><td>Autorización y flujos</td><td>Playwright</td>'
                      f'<td class="num">{t.get("failed", 0)} fallan / {sum(t.values())}</td>'
                      f'<td></td><td class="ran-yes">sí</td></tr>')
-    parts.append(f'<tr><td>Carga</td><td>k6</td><td class="num">{"—" if not k6 else "ver abajo"}'
-                 f'</td><td></td><td class="{"ran-yes" if k6 else "ran-no"}">'
-                 f'{"sí" if k6 else "NO EJECUTADO"}</td></tr>')
+    if k6:
+        k6_cell = '<td class="ran-yes">sí</td>'
+    elif tier < 2:
+        k6_cell = '<td class="ran-na">NO DISPONIBLE</td>'
+    else:
+        k6_cell = '<td class="ran-no">NO EJECUTADO</td>'
+    parts.append(f'<tr><td>Carga</td><td>k6</td>'
+                 f'<td class="num">{"ver abajo" if k6 else "—"}</td><td></td>{k6_cell}</tr>')
     parts.append(f'<tr><td>Inventario (SBOM)</td><td>Syft</td><td class="num">—</td><td></td>'
                  f'<td class="{"ran-yes" if sbom else "ran-no"}">'
                  f'{"sí" if sbom else "NO EJECUTADO"}</td></tr>')
@@ -391,7 +378,7 @@ def build(target, root):
         parts.append(
             f'<details><summary><span>{E(title)} · {E(tool)}</span>'
             f'<span class="chip"><b>{data["count"]}</b></span></summary>'
-            f'<div class="body">{sev_chips(data["sev"])}{findings_block(data)}'
+            f'<div class="body">{sev_chips(data["sev"])}{findings_block(data, verdicts=verdicts)}'
             f'<div class="more">Artefacto crudo: <code>{E(artifact)}</code></div>'
             f'</div></details>'
         )

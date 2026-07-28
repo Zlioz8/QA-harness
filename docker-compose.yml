@@ -173,6 +173,12 @@ services:
   zap:
     profiles: ["dast"]
     image: zaproxy/zap-stable:latest
+    # Reaching an application the lab did NOT bring up (the common case: the team already
+    # deploys it themselves). Inside this network, "localhost" is the tool's own container —
+    # so a host deployment is addressed as host.docker.internal, which on Linux only resolves
+    # with this mapping. Playwright does not need it: it runs with network_mode: host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./targets/${TARGET_NAME}/zap:/zap/wrk/zap:ro
       - ./reports/${TARGET_NAME}/zap:/zap/wrk/reports
@@ -185,6 +191,10 @@ services:
   k6:
     profiles: ["perf"]
     image: grafana/k6:latest
+    # See the note on the zap service: lets APP_INTERNAL_URL point at a deployment running
+    # on the host rather than at a container the lab started.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - ./targets/${TARGET_NAME}/target.env
     environment:
@@ -235,6 +245,48 @@ services:
              npm init -y >/dev/null 2>&1 &&
              npm i -D @playwright/test@1.49.0 >/dev/null 2>&1 &&
              npx playwright test"
+
+  # ---------- ui ----------
+  # Local, single-operator web interface. See ui/app.py for the scope decision.
+  #
+  # SECURITY INVARIANT: the host side of this mapping is the literal 127.0.0.1 and must never
+  # become a variable or 0.0.0.0. This container holds the Docker socket, so whatever reaches
+  # the port can start arbitrary containers — root on this host. tools/ui-check-bind.sh verifies
+  # it from outside after startup and shuts the UI down if it is ever published wider.
+  ui:
+    profiles: ["ui"]
+    build: ./ui
+    # Run as the operator, not as root: this process creates target profiles and report files on
+    # a bind mount, and root-owned files there cannot be deleted or edited from the host
+    # afterwards. The extra group is the docker socket's, which is what lets a non-root user
+    # reach it — it is also, honestly, what makes this container root-equivalent anyway.
+    user: "${UI_UID:-1000}:${UI_GID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
+    ports:
+      - "127.0.0.1:${UI_PORT:-7777}:7777"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The lab is mounted at the SAME absolute path it has on the host. The UI shells out to
+      # docker compose, but bind mounts are resolved by the host's daemon: if the lab lived at
+      # /app in here, the daemon would look for /app/targets/... on the host, find nothing, and
+      # silently create an empty directory to mount — analyses would then run over nothing.
+      - ${LAB_DIR}:${LAB_DIR}
+      # Read-only view of where the audited checkouts live, at their real paths, so the UI can
+      # tell whether a SRC_PATH exists and which rung a profile is on. The analysis tools do not
+      # need this — their mounts are resolved by the host daemon — only the UI's own checks do.
+      # It grants no new privilege: this container already holds the Docker socket, which is
+      # root on the host. Defaults to the lab's parent directory; override SRC_MOUNT when your
+      # checkouts live somewhere else entirely.
+      # The default is never used — `make ui` always sets SRC_MOUNT — but it must be a valid
+      # path, because compose parses this whole file for EVERY goal. Without it, the tool goals
+      # (which use a target.env that has no SRC_MOUNT) die on "invalid spec: ::ro".
+      - ${SRC_MOUNT:-/tmp}:${SRC_MOUNT:-/tmp}:ro
+    working_dir: ${LAB_DIR}
+    environment:
+      LAB_DIR: ${LAB_DIR}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   trivy_cache:

@@ -30,69 +30,77 @@ guard:
 	@mkdir -p $(REPORTS) $(REPORTS)/trivy $(REPORTS)/semgrep $(REPORTS)/sbom $(REPORTS)/sonar \
 	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build
 
-.PHONY: help list new detect doctor guard clone up down purge status gate dashboard run-manifest \
+.PHONY: help list new detect doctor guard require-live clone up down purge status gate dashboard run-manifest ui ui-stop ui-logs \
         sonar qodana semgrep secrets deps config-scan image-scan sbom static \
-        build dast perf e2e all
+        build dast perf e2e live all
 
-help:             ## show this list
-	@grep -hE '^[a-z0-9_-]+:.*?##' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?## "};{printf "  \033[36m%-14s\033[0m %s\n",$$1,$$2}'
+help:             ##[admin] show this list, grouped by what each goal needs
+	@echo ""
+	@echo "  \033[1m[code]\033[0m  needs only a source checkout. No deployment, no credentials."
+	@grep -hE '^[a-z0-9_-]+:.*?##\[code\]' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?##.code. "};{printf "    \033[36m%-14s\033[0m %s\n",$$1,$$2}'
+	@echo ""
+	@echo "  \033[1m[live]\033[0m  needs the application answering: yours, or one the lab brings up."
+	@grep -hE '^[a-z0-9_-]+:.*?##\[live\]' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?##.live. "};{printf "    \033[36m%-14s\033[0m %s\n",$$1,$$2}'
+	@echo ""
+	@echo "  \033[1m[admin]\033[0m housekeeping."
+	@grep -hE '^[a-z0-9_-]+:.*?##\[admin\]' $(MAKEFILE_LIST) | sort | awk 'BEGIN{FS=":.*?##.admin. "};{printf "    \033[36m%-14s\033[0m %s\n",$$1,$$2}'
 	@echo ""
 	@echo "  Targets available: $$(ls targets | tr '\n' ' ')"
 
-list:             ## list target profiles
+list:             ##[admin] list target profiles
 	@ls targets
 
 # ---- onboarding a new project ----
-new:              ## scaffold targets/$(TARGET) from the template
+new:              ##[admin] scaffold targets/$(TARGET) from the template
 	@tools/new-target.sh "$(TARGET)"
 
-detect:           ## sniff the source tree and propose target.env values
+detect:           ##[admin] sniff the source tree and propose target.env values
 	@tools/detect.sh "$(TARGET)"
 
-doctor: guard     ## preflight: docker, disk, free ports, reports permissions
+doctor: guard     ##[admin] preflight: docker, disk, free ports, reports permissions
 	@tools/doctor.sh "$(TARGET)"
 
 # ---- source ----
-clone: guard      ## fetch REPO_URL@BRANCH into work/$(TARGET) (only if SRC_PATH is not local)
+clone: guard      ##[code] fetch REPO_URL@BRANCH into work/$(TARGET) (only if SRC_PATH is not local)
 	$(DC) --profile clone run --rm clone
 
 # ---- static analysis: works with NO running app ----
-secrets: guard    ## gitleaks + trufflehog over the full git history
+secrets: guard    ##[code] gitleaks + trufflehog over the full git history
 	$(DC) --profile static run --rm gitleaks
 	$(DC) --profile static run --rm trufflehog
 
-deps: guard       ## Trivy filesystem scan (dependency CVEs + secrets + misconfig)
+deps: guard       ##[code] Trivy filesystem scan (dependency CVEs + secrets + misconfig)
 	$(DC) --profile static run --rm trivy
 
-config-scan: guard ## Trivy over the target's own Dockerfiles / compose / k8s
+config-scan: guard ##[code] Trivy over the target's own Dockerfiles / compose / k8s
 	$(DC) --profile static run --rm trivy-config
 
-image-scan: guard ## Trivy over a built image:  make image-scan TARGET=x IMAGE=repo:tag
+image-scan: guard ##[code] Trivy over a built image:  make image-scan TARGET=x IMAGE=repo:tag
 	IMAGE=$(IMAGE) $(DC) --profile static run --rm trivy-image
 
-sbom: guard       ## Syft SBOM + licences
+sbom: guard       ##[code] Syft SBOM + licences
 	$(DC) --profile static run --rm syft
 
-semgrep: guard    ## polyglot SAST with taint tracking
+semgrep: guard    ##[code] polyglot SAST with taint tracking
 	$(DC) --profile static run --rm semgrep
 
-sonar: guard      ## SonarQube server + scanner
+sonar: guard      ##[code] SonarQube server + scanner
 	$(DC) --profile static up -d sonarqube
 	$(DC) --profile static run --rm sonar-scanner
 
-qodana: guard     ## JetBrains Qodana (image chosen by QODANA_IMAGE in target.env)
+qodana: guard     ##[code] JetBrains Qodana (image chosen by QODANA_IMAGE in target.env)
 	$(DC) --profile static run --rm qodana
 
-static: secrets deps config-scan sbom semgrep qodana sonar  ## every static tool
+static: secrets deps config-scan sbom semgrep qodana sonar  ##[code] every static tool
 
 # ---- runtime-dependent (needs the target's compose.runtime.yml) ----
-up: guard         ## start the target's runtime
+up: guard         ##[live] start the target's runtime
 	$(DC) --profile runtime up -d --build
 
-build: guard      ## the target's production build, if it has one
+build: guard      ##[code] the target's production build, if it has one
 	$(DC) --profile build run --rm front-build
 
-dast: guard       ## OWASP ZAP against the running app
+dast: guard require-live       ##[live] OWASP ZAP against the running app
 	@# ZAP exits non-zero on plan WARNINGS (an unreachable seed URL, say), which would abort the
 	@# pipeline over a note. Same principle as `make gate`: a tool reports, it does not judge.
 	@# But "ignore the exit code" must not hide a tool that never ran, so the success criterion
@@ -102,34 +110,78 @@ dast: guard       ## OWASP ZAP against the running app
 	  || { echo "ZAP produced no report — check permissions on $(REPORTS)/zap and the plan"; exit 1; }
 	@echo "ZAP report: $(REPORTS)/zap/zap-report.html"
 
-perf: guard       ## k6 load test
+perf: guard require-live       ##[live] k6 load test
 	$(DC) --profile perf run --rm k6
 
-e2e: guard        ## Playwright functional / authz flows
+e2e: guard require-live        ##[live] Playwright functional / authz flows
 	$(DC) --profile e2e run --rm playwright
 
-all: static dast perf e2e  ## full pipeline (run `make up` first)
+live: dast perf e2e  ##[live] every dimension that needs the application answering
+
+all: static live  ##[live] full pipeline (bring the application up first)
+
+require-live: guard
+	@tools/require-live.sh "$(TARGET)"
 
 # ---- run bookkeeping ----
-run-manifest: guard ## write reports/$(TARGET)/RUN.md (commit, digests, envelope, coverage)
+run-manifest: guard ##[admin] write reports/$(TARGET)/RUN.md (commit, digests, envelope, coverage)
 	@tools/run-manifest.sh "$(TARGET)"
 
-gate: guard       ## exit != 0 when the thresholds in target.env are breached
+gate: guard       ##[admin] exit != 0 when the thresholds in target.env are breached
 	@tools/gate.sh "$(TARGET)"
 
-dashboard: guard  ## build reports/$(TARGET)/index.html — one readable page from every tool
+dashboard: guard  ##[admin] build reports/$(TARGET)/index.html — one readable page from every tool
 	@tools/dashboard.py "$(TARGET)"
 
-status: guard     ## what is up, what has been run, what is missing
+status: guard     ##[admin] what is up, what has been run, what is missing
 	@tools/status.sh "$(TARGET)"
 
+# ---- web interface ----
+# Lab-wide, not per target: no TARGET and no --env-file. LAB_DIR must be the lab's absolute
+# path on the HOST, because the container mounts itself at that same path (see the ui service).
+# Compose validates the WHOLE file even when starting a single service, so the tool services'
+# variables must resolve to something syntactically valid. These placeholders are never used:
+# no tool service is started by this goal. Without them, an unset SRC_PATH yields the mount
+# spec ":/repo:ro" and compose refuses to parse the file at all.
+#
+# SRC_MOUNT: where the audited checkouts live, mounted read-only so the UI can see them. The
+# lab's parent directory by default; override it when your code lives elsewhere:
+#   make ui SRC_MOUNT=/home/dev/repos
+# Computed with `dirname`, not with make's $(dir ...): make's text functions split their argument
+# on whitespace, so a lab living under a path with spaces would come out as five separate words.
+SRC_MOUNT ?= $(shell dirname "$(CURDIR)")
+
+# The UI runs as the operator so the files it creates stay editable from the host, plus the
+# docker socket's group so it can still reach the daemon.
+UI_UID     = $(shell id -u)
+UI_GID     = $(shell id -g)
+DOCKER_GID = $(shell stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 999)
+
+UI_DC = LAB_DIR="$(CURDIR)" SRC_MOUNT="$(SRC_MOUNT)" SRC_PATH="$(CURDIR)" TARGET_NAME=_ui \
+        UI_UID="$(UI_UID)" UI_GID="$(UI_GID)" DOCKER_GID="$(DOCKER_GID)" \
+        APP_INTERNAL_URL=http://unused docker compose -f docker-compose.yml --profile ui
+
+ui:               ##[admin] start the local web interface on 127.0.0.1 (holds the Docker socket)
+	@$(UI_DC) up -d --build ui
+	@tools/ui-check-bind.sh
+	@echo ""
+	@echo "  QA-harness:  http://127.0.0.1:$${UI_PORT:-7777}"
+	@echo "  Solo para este equipo. No la publiques: tiene el socket de Docker."
+	@echo ""
+
+ui-stop:          ##[admin] stop the web interface
+	@$(UI_DC) down
+
+ui-logs:          ##[admin] follow the web interface's own log
+	@$(UI_DC) logs -f ui
+
 # ---- teardown ----
-down: guard       ## stop everything and drop volumes (no residue)
+down: guard       ##[admin] stop everything and drop volumes (no residue)
 	$(DC) --profile clone --profile runtime --profile static --profile build \
 	      --profile dast --profile perf --profile e2e --profile prod \
 	      down -v --remove-orphans
 
-purge: guard      ## delete this target's reports (data policy: they may hold real data)
+purge: guard      ##[admin] delete this target's reports (data policy: they may hold real data)
 	@echo "Deleting $(REPORTS)/ — this is irreversible."
 	@read -p "Type the target name to confirm: " c; test "$$c" = "$(TARGET)" || { echo "aborted"; exit 1; }
 	rm -rf $(REPORTS)
