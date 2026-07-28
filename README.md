@@ -1,4 +1,4 @@
-# SECURITY-LAB — laboratorio de auditoría/QA multiproyecto
+# QA-harness — laboratorio de auditoría/QA multiproyecto
 
 Audita **cualquier** proyecto con herramientas estándar, cada una con su configuración nativa. La
 orquestación es `docker compose` declarativo y un `Makefile` de objetivos 1:1.
