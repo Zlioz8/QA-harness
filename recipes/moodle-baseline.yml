@@ -1,0 +1,68 @@
+# RECIPE: the platform's OWN Moodle, restored from a baseline snapshot, ephemeral.
+#
+# Use this instead of recipes/moodle-plugin.yml when the audited plugin is deployed on a
+# specific platform and the version matters — which, measured, it always does. See the note in
+# moodle-baseline/Dockerfile: a stock image reported four working endpoints as broken.
+#
+# A baseline is a directory under baselines/<name>/ holding
+#     moodle.dump    pg_dump -Fc of the platform database, activity log EXCLUDED
+#     code.tar.zst   the Moodle tree, config.php excluded
+#     MANIFEST.md    where it came from, when, and what was left out
+# produced by tools/moodle-snapshot.sh, which only ever READS from the source server.
+#
+# The copy is neutralised during restore, before the port is reachable: no outbound mail, no
+# web-service tokens, no inherited sessions, wwwroot rewritten. See db-init/02-neuter.sh — the
+# reasoning there is the price of admission for mirroring a real platform at all.
+services:
+  db:
+    profiles: ["runtime", "dast", "perf", "e2e"]
+    image: ${DB_IMAGE:-postgres:16}
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      MOODLE_WWWROOT: ${MOODLE_WWWROOT}
+    volumes:
+      # Paths are relative to THIS file's directory.
+      - ./moodle-baseline/db-init:/docker-entrypoint-initdb.d:ro
+      - ../baselines/${MOODLE_BASELINE}:/baseline:ro
+    healthcheck:
+      # Restoring 110 MB takes minutes, and during it postgres answers pg_isready perfectly well.
+      # Gating on a table the restore creates is what makes `depends_on: service_healthy` mean
+      # "the baseline is in", instead of "the server accepts connections".
+      test: ["CMD-SHELL", "psql -U $${POSTGRES_USER} -d $${POSTGRES_DB} -tAc 'SELECT 1 FROM mdl_course LIMIT 1' | grep -q 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 60s
+
+  moodle:
+    profiles: ["runtime", "dast", "perf", "e2e"]
+    build:
+      context: ./moodle-baseline
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      MOODLE_WWWROOT: ${MOODLE_WWWROOT}
+    volumes:
+      - ${SRC_PATH}/${PLUGIN_SUBDIR:-.}:/plugin-src:ro
+      - ../baselines/${MOODLE_BASELINE}:/baseline:ro
+      - moodle_code:/var/www/html
+      - moodle_data:/var/www/zajunadata
+    ports:
+      - "127.0.0.1:${MOODLE_PORT:-8083}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/zajuna/login/index.php >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 240s
+
+volumes:
+  moodle_code:
+  moodle_data:

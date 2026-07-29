@@ -29,3 +29,9 @@ targets/movil/
 
 # Editor settings — not part of the lab.
 .vscode/
+
+# Platform baselines: snapshots of a real Moodle (110 MB dump + 66 MB code tree). Regenerated
+# from the source server with tools/moodle-snapshot.sh, and too large for git — but the MANIFEST
+# is versioned, so which baseline a run used stays reviewable.
+baselines/*/*.dump
+baselines/*/*.tar.zst

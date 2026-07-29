@@ -34,18 +34,31 @@ for v in A_USER A_PASS B_USER B_PASS; do
   [ -n "${!v}" ] || { echo "target.env: $v is empty — nothing to seed" >&2; exit 2; }
 done
 
-docker exec "$C" test -f /bitnami/moodle/config.php \
-  || { echo "Moodle is not up: run 'make up TARGET=$TARGET' first" >&2; exit 2; }
+# The Moodle root differs by recipe: the Bitnami image keeps it at /bitnami/moodle, the
+# platform baseline serves the real tree at /var/www/html/zajuna. Detect it rather than hardcode,
+# so one seed script serves both and switching recipes does not silently seed nothing.
+MROOT=""
+for candidate in /var/www/html/zajuna /bitnami/moodle; do
+  docker exec "$C" test -f "$candidate/config.php" 2>/dev/null && { MROOT="$candidate"; break; }
+done
+[ -n "$MROOT" ] || { echo "Moodle is not up: run 'make up TARGET=$TARGET' first" >&2; exit 2; }
+echo "moodle root: $MROOT"
+# display_errors=0 and `tail -1` are both needed: the real platform ships plugins that emit
+# PHP 8.2 deprecation notices on include (local/asistencia among them), and those notices land
+# on STDOUT ahead of the value. Capturing them turns $MDATA into a path with a warning glued to
+# the front, and the chown below then fails on a filename nobody can read.
+MDATA=$(docker exec "$C" php -d display_errors=0 -d error_reporting=0 \
+  -r "define('CLI_SCRIPT',true); require('$MROOT/config.php'); echo \$CFG->dataroot;" 2>/dev/null | tail -1)
 
 # The lab's own throwaway passwords are simple on purpose; Moodle's default policy would
 # reject them and the seed would fail for a reason that has nothing to do with the audit.
-docker exec "$C" php /bitnami/moodle/admin/cli/cfg.php --name=passwordpolicy --set=0 >/dev/null 2>&1 || true
+docker exec "$C" php $MROOT/admin/cli/cfg.php --name=passwordpolicy --set=0 >/dev/null 2>&1 || true
 
-docker exec -i "$C" php -d display_errors=1 /dev/stdin \
+docker exec -i -e MROOT="$MROOT" "$C" php -d display_errors=1 /dev/stdin \
   "$A_USER" "$A_PASS" "$B_USER" "$B_PASS" <<'PHP'
 <?php
 define('CLI_SCRIPT', true);
-require('/bitnami/moodle/config.php');
+require(getenv('MROOT').'/config.php');
 require_once($CFG->dirroot.'/user/lib.php');
 require_once($CFG->libdir.'/accesslib.php');
 
@@ -114,8 +127,8 @@ PHP
 # Moodle then answers EVERY request with a 500 "Invalid permissions detected when trying to
 # create a directory" — a message that names permissions but never says whose. Same trap the
 # plugin-install hook documents; give the data directory back to its owner.
-OWNER=$(docker exec "$C" stat -c '%u:%g' /bitnami/moodledata)
-docker exec "$C" chown -R "$OWNER" /bitnami/moodledata
+OWNER=$(docker exec "$C" stat -c '%u:%g' "$MDATA")
+docker exec "$C" chown -R "$OWNER" "$MDATA"
 echo "moodledata ownership restored to $OWNER"
 
 echo

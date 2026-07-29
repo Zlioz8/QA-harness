@@ -14,6 +14,8 @@
 # the shape of one (seed-users.sh).
 
 # include paths resolve against the PROJECT directory (the lab root), not against this file.
+# NOT recipes/postgres.yml: moodle-baseline.yml brings its own `db`, because the baseline's
+# restore and neutering run from that container's init hooks. Including both would define the
+# service twice and compose would silently merge them into something neither recipe describes.
 include:
-  - path: ./recipes/postgres.yml
-  - path: ./recipes/moodle-plugin.yml
+  - path: ./recipes/moodle-baseline.yml

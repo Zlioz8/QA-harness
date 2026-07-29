@@ -20,6 +20,17 @@ export const CREDS: Record<Role, { user: string; pass: string }> = {
   B: { user: process.env.ROLE_B_USER || '', pass: process.env.ROLE_B_PASS || '' },
 };
 
+/** Absolute URL from a path.
+ *
+ * Playwright resolves a leading-slash path against the ORIGIN, not against a baseURL that
+ * carries a path prefix: with BASE=http://host:8083/zajuna, `ctx.get('/login/index.php')` asks
+ * for http://host:8083/login/index.php and gets a 404. Nothing errors — the adapter reports a
+ * failed login, or worse the suite reads that 404 as "access denied" and every authorization
+ * test passes for the wrong reason. Concatenate; it is also correct for path-less bases.
+ */
+export const u = (path: string): string =>
+  /^https?:\/\//.test(path) ? path : `${BASE}${path}`;
+
 export interface AuthAdapter {
   name: string;
   loginAs(role: Role): Promise<APIRequestContext>;
@@ -45,8 +56,8 @@ const sanctum: AuthAdapter = {
   name: 'sanctum',
   async loginAs(role) {
     const ctx = await newCtx();
-    await ctx.get('/sanctum/csrf-cookie');
-    const res = await ctx.post('/api/login', {
+    await ctx.get(u('/sanctum/csrf-cookie'));
+    const res = await ctx.post(u('/api/login'), {
       headers: { 'X-XSRF-TOKEN': await cookie(ctx, 'XSRF-TOKEN'), 'Content-Type': 'application/json' },
       data: { email: CREDS[role].user, password: CREDS[role].pass },
     });
@@ -66,9 +77,9 @@ const moodleSession: AuthAdapter = {
   name: 'moodle-session',
   async loginAs(role) {
     const ctx = await newCtx();
-    const page = await (await ctx.get('/login/index.php')).text();
+    const page = await (await ctx.get(u('/login/index.php'))).text();
     const token = /name="logintoken"\s+value="([^"]+)"/.exec(page)?.[1] ?? '';
-    const res = await ctx.post('/login/index.php', {
+    const res = await ctx.post(u('/login/index.php'), {
       form: { username: CREDS[role].user, password: CREDS[role].pass, logintoken: token },
       maxRedirects: 5,
     });
@@ -85,7 +96,7 @@ const moodleSession: AuthAdapter = {
 
 /** Moodle's per-session CSRF value, needed as a query/form parameter. */
 export async function sesskeyOf(ctx: APIRequestContext): Promise<string> {
-  const html = await (await ctx.get('/my/')).text();
+  const html = await (await ctx.get(u('/my/'))).text();
   return /"sesskey":"([^"]+)"/.exec(html)?.[1] ?? /sesskey=([A-Za-z0-9]+)/.exec(html)?.[1] ?? '';
 }
 
@@ -95,7 +106,7 @@ const jwtBearer: AuthAdapter = {
   async loginAs(role) {
     const path = process.env.LOGIN_PATH || '/api/login';
     const tmp = await newCtx();
-    const res = await tmp.post(path, {
+    const res = await tmp.post(u(path), {
       data: { username: CREDS[role].user, password: CREDS[role].pass },
     });
     if (res.status() !== 200) throw new Error(`jwt login failed for role ${role}: ${res.status()}`);
@@ -138,7 +149,7 @@ const zajuna: AuthAdapter = {
     const tmp = await newCtx();
     // Absolute url (BASE may carry a path prefix like /mobile/api that a leading-slash path
     // would drop when Playwright resolves it against the origin).
-    const res = await tmp.post(`${BASE}${path}`, {
+    const res = await tmp.post(u(path), {
       data: {
         type_document: process.env.DOC_TYPE || 'CC',
         document: CREDS[role].user,
