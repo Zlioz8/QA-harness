@@ -63,7 +63,7 @@ if [ "$n" -lt 0 ]; then skip "sonar not run"
 elif [ "$n" -le "${MAX_QUALITY_FINDINGS:-500}" ]; then pass "quality findings: $n (max ${MAX_QUALITY_FINDINGS:-500})"
 else fail "quality findings: $n (max ${MAX_QUALITY_FINDINGS:-500})"; fi
 
-n=$(sarif_count "$R/zap/zap-report.json")
+n=$(sarif_count "$R/zap/zap.sarif")
 if [ "$n" -lt 0 ]; then skip "ZAP not run"
 elif [ "$n" -le "${MAX_DAST_FINDINGS:-999}" ]; then pass "DAST alerts: $n (max ${MAX_DAST_FINDINGS:-999})"
 else fail "DAST alerts: $n (max ${MAX_DAST_FINDINGS:-999})"; fi

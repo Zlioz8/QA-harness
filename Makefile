@@ -121,6 +121,10 @@ dast: guard require-live       ##[live] OWASP ZAP against the running app
 	-$(DC) --profile dast run --rm zap
 	@test -s $(REPORTS)/zap/zap-report.json \
 	  || { echo "ZAP produced no report — check permissions on $(REPORTS)/zap and the plan"; exit 1; }
+	@# ZAP escribe SU formato, no SARIF. Sin esta conversión el gate cuenta 0 alertas sobre un
+	@# informe lleno y estampa PASS — el mismo modo de fallo que sarif_count: aprobar lo que no
+	@# se sabe leer. El HTML queda para personas; el SARIF, para el gate y el informe.
+	@tools/zap-sarif.py $(REPORTS)/zap || true
 	@echo "ZAP report: $(REPORTS)/zap/zap-report.html"
 
 perf: guard require-live       ##[live] k6 load test

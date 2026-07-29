@@ -19,3 +19,19 @@
 # service twice and compose would silently merge them into something neither recipe describes.
 include:
   - path: ./recipes/moodle-baseline.yml
+
+services:
+  # ZAP en la red del HOST, sólo para este perfil.
+  #
+  # Moodle impone su wwwroot: cualquier petición cuyo Host no coincida recibe una redirección
+  # 303 hacia él. Con ZAP en la red del compose, pedir http://moodle:80/zajuna devuelve un
+  # redirect a http://localhost:8083 — y "localhost" dentro del contenedor de ZAP es ZAP, no
+  # Moodle. El spider muere con "Connection refused" y el informe sale vacío pero existiendo,
+  # que es la peor combinación: parece que se midió.
+  #
+  # En la red del host, localhost:8083 significa lo mismo para ZAP que para el navegador, así
+  # que la redirección de Moodle resuelve. Es la misma razón por la que playwright usa
+  # network_mode: host. No se toca el servicio zap del núcleo: otros perfiles apuntan a un
+  # contenedor por nombre de servicio y allí la red del compose es la correcta.
+  zap:
+    network_mode: host

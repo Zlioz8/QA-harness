@@ -289,7 +289,7 @@ def build(target, root):
          "sonar/sonar.sarif"),
         ("Contrato de API (OpenAPI)", "Spectral", load_sarif(f"{rep}/api/spectral.sarif", "api-lint"),
          "api/spectral.sarif"),
-        ("Superficie runtime (DAST)", "OWASP ZAP", load_sarif(f"{rep}/zap/zap-report.json", "zap"),
+        ("Superficie runtime (DAST)", "OWASP ZAP", load_sarif(f"{rep}/zap/zap.sarif", "zap"),
          "zap/zap-report.html"),
     ]
     pw = load_playwright(f"{rep}/playwright/results.json")

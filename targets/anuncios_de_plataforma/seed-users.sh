@@ -131,6 +131,19 @@ OWNER=$(docker exec "$C" stat -c '%u:%g' "$MDATA")
 docker exec "$C" chown -R "$OWNER" "$MDATA"
 echo "moodledata ownership restored to $OWNER"
 
+# El esquema `midb`: las tablas que el plugin consulta fuera de Moodle, con datos sintéticos.
+# Va DESPUÉS de crear las cuentas porque una de las filas se atribuye al rol A por username.
+# Sin esto, saved_filters y el historial de envíos responden 500 y quedan SIN MEDIR — que no es
+# lo mismo que sin hallazgos.
+FIXTURE="$(dirname "$0")/../../scenarios/zajunadb-fixture.sql"
+if [ -f "$FIXTURE" ]; then
+  DBC=seclab_${TARGET}-db-1
+  DBN=$(envget DB_NAME); DBU=$(envget DB_USER)
+  docker exec -i "$DBC" psql -q -U "$DBU" -d "$DBN" -v ON_ERROR_STOP=1 < "$FIXTURE" >/dev/null \
+    && echo "escenario midb aplicado (regionales, centros, saved_filters, envios2)" \
+    || echo "AVISO: el escenario midb falló — saved_filters y export_envios darán 500" >&2
+fi
+
 echo
 echo "Role A = $A_USER  (has local/slider_form:view + :edit at system context)"
 echo "Role B = $B_USER  (plain authenticated user — the one that must be denied)"

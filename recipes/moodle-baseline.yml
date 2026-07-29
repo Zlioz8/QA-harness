@@ -25,6 +25,10 @@ services:
     volumes:
       # Paths are relative to THIS file's directory.
       - ./moodle-baseline/db-init:/docker-entrypoint-initdb.d:ro
+      # El escenario del proyecto NO se monta aquí. Dos razones, ambas silenciosas:
+      # postgres no recorre subdirectorios de initdb.d, así que un montaje anidado no se
+      # ejecutaría nunca; y un escenario suele referirse a usuarios que Moodle todavía no ha
+      # creado en ese instante. Va en el seed del perfil, después de sembrar las cuentas.
       - ../baselines/${MOODLE_BASELINE}:/baseline:ro
     healthcheck:
       # Restoring 110 MB takes minutes, and during it postgres answers pg_isready perfectly well.

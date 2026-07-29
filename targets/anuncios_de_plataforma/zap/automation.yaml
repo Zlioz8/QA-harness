@@ -14,11 +14,11 @@ env:
   contexts:
     - name: anuncios
       urls:
-        - "http://moodle:8080"
+        - "http://localhost:8083/zajuna"
       includePaths:
-        - "http://moodle:8080/local/slider_form.*"
-        - "http://moodle:8080/local/slider.*"
-        - "http://moodle:8080/login.*"
+        - "http://localhost:8083/zajuna/local/slider_form.*"
+        - "http://localhost:8083/zajuna/local/slider.*"
+        - "http://localhost:8083/zajuna/login.*"
       excludePaths:
         - ".*/login/logout.php.*"   # logging ourselves out mid-scan ends the scan
         - ".*/admin/.*"             # site administration is Moodle's, not this audit's
@@ -33,7 +33,7 @@ jobs:
   - type: spider
     parameters:
       context: anuncios
-      url: "http://moodle:8080/local/slider_form/"
+      url: "http://localhost:8083/zajuna/local/slider_form/"
       maxDuration: 3
 
   # The AJAX endpoints are never linked from HTML — they are called from JS — so the crawler

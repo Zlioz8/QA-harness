@@ -35,7 +35,7 @@ SOURCES = [
     ("semgrep",      "SAST",                            "semgrep/semgrep.sarif"),
     ("sonar",        "Calidad (SonarQube)",             "sonar/sonar.sarif"),
     ("api-lint",     "Contrato de API (Spectral)",      "api/spectral.sarif"),
-    ("zap",          "Superficie runtime (DAST)",       "zap/zap-report.json"),
+    ("zap",          "Superficie runtime (DAST)",       "zap/zap.sarif"),
 ]
 
 TOOL_LABEL = {tid: label for tid, label, _ in SOURCES}
