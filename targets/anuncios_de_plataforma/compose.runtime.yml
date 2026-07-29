@@ -1,0 +1,19 @@
+# Runtime for anuncios_de_plataforma — rung 3, composed from recipes.
+#
+# `local_slider` and `local_slider_form` are Moodle plugins: they have no entry point of their
+# own, so there is nothing to point a scanner at until a Moodle exists around them. This file
+# builds that Moodle, ephemeral and reproducible, and destroys it with `make down`.
+#
+# PLUGIN_SUBDIR is the repository ROOT here, not a single plugin directory: the recipe's install
+# hook finds every version.php and derives each plugin's destination from its own
+# `$plugin->component`, so both plugins are installed and upgraded by Moodle itself.
+#
+# What this deliberately does NOT do: seed content. An empty Moodle answers every plugin screen
+# with "nothing to show", and a DAST run against empty screens finds an empty application. The
+# seeded scenario is the next input the operator owes this profile — see targets/antiplagio for
+# the shape of one (seed-users.sh).
+
+# include paths resolve against the PROJECT directory (the lab root), not against this file.
+include:
+  - path: ./recipes/postgres.yml
+  - path: ./recipes/moodle-plugin.yml

@@ -1,0 +1,67 @@
+# OWASP ZAP Automation Framework plan — anuncios_de_plataforma.
+#
+# ZAP runs UNAUTHENTICATED here. What that covers, precisely: security headers, the login
+# surface, and anything the two plugins expose without a Moodle session. What it does NOT
+# cover: authorization. A clean report below is not evidence that a learner cannot reach the
+# banner administration — that question belongs to the Playwright matrix
+# (playwright/authz-matrix.json), which logs in as two unequal accounts.
+#
+# The interesting surface is the plugins' own PHP entry points. Every write endpoint validates
+# through a wrapper (usersValidations::checkSession / checkUserRole / checkCsrfToken) rather
+# than Moodle's require_login, so what the unauthenticated crawl gets back from them — a
+# redirect, a JSON error, or a body — is worth reading in the report itself.
+env:
+  contexts:
+    - name: anuncios
+      urls:
+        - "http://moodle:8080"
+      includePaths:
+        - "http://moodle:8080/local/slider_form.*"
+        - "http://moodle:8080/local/slider.*"
+        - "http://moodle:8080/login.*"
+      excludePaths:
+        - ".*/login/logout.php.*"   # logging ourselves out mid-scan ends the scan
+        - ".*/admin/.*"             # site administration is Moodle's, not this audit's
+  parameters:
+    failOnError: false              # the gate decides the verdict, not a tool's exit code
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  # Seeded on the plugin directory rather than "/": a spider that starts at the Moodle home page
+  # spends its budget crawling Moodle and may never reach the code under audit.
+  - type: spider
+    parameters:
+      context: anuncios
+      url: "http://moodle:8080/local/slider_form/"
+      maxDuration: 3
+
+  # The AJAX endpoints are never linked from HTML — they are called from JS — so the crawler
+  # cannot discover them. Listed explicitly, otherwise the most sensitive surface in the plugin
+  # (mass mailing, history export) is simply absent from the scan and nobody notices.
+  - type: import
+    parameters:
+      type: url
+      fileName: /zap/wrk/zap/urls.txt
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  - type: activeScan
+    parameters:
+      context: anuncios
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 10
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.json
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.html

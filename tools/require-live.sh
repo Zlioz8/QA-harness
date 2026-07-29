@@ -15,7 +15,7 @@ ENVFILE="targets/$TARGET/target.env"
 [ -f "$ENVFILE" ] || { echo "no $ENVFILE"; exit 2; }
 
 # Never source a target profile: values contain spaces, and a profile is data, not code.
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
+. "$(dirname "$0")/lib-env.sh"   # one parser for target.env — see the file for why
 
 BASE_URL=$(envget BASE_URL)
 HEALTH_PATH=$(envget HEALTH_PATH)

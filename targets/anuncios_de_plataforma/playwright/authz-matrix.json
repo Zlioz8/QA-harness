@@ -1,0 +1,128 @@
+[
+  {
+    "path": "/local/slider_form/index.php",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "administration screen for the platform-wide banner; index.php only calls require_login, so any authenticated learner reaching it is the finding"
+  },
+  {
+    "path": "/local/slider_form/menu.php",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "plugin menu"
+  },
+  {
+    "path": "/local/slider_form/segmented.php",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "segmented-mailing composer: picks regionales, centros, programas and roles"
+  },
+  {
+    "path": "/local/slider_form/manage_images.php",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "banner image management"
+  },
+  {
+    "path": "/local/slider_form/show_order.php",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "checkUserRole is called with the 'view' level here, unlike the write endpoints"
+  },
+  {
+    "path": "/local/slider_form/table_logs.php?asunto=lab",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "delivery log. Needs the 'asunto' parameter: without it Moodle answers 404 for a missing required param, which the matrix would otherwise read as a denial"
+  },
+  {
+    "path": "/local/slider_form/insertRecord.php",
+    "method": "POST",
+    "allow": [
+      "A"
+    ],
+    "body": {},
+    "note": "creates a banner shown to the whole platform. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+  },
+  {
+    "path": "/local/slider_form/updateRecord.php",
+    "method": "POST",
+    "allow": [
+      "A"
+    ],
+    "body": {},
+    "note": "edits an existing banner. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+  },
+  {
+    "path": "/local/slider_form/deleteRecord.php",
+    "method": "POST",
+    "allow": [
+      "A"
+    ],
+    "body": {},
+    "note": "deletes a banner. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+  },
+  {
+    "path": "/local/slider_form/order.php",
+    "method": "POST",
+    "allow": [
+      "A"
+    ],
+    "body": {},
+    "note": "reorders the carousel. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+  },
+  {
+    "path": "/local/slider_form/ajax/send_segmented.php",
+    "method": "POST",
+    "allow": [
+      "A"
+    ],
+    "body": {},
+    "note": "SENDS MASS EMAIL to every user enrolled in the resolved courses. The highest-impact endpoint in the plugin: if a low-privilege account reaches it, the platform is a spam relay addressed from an institutional domain. db/access.php tags the capability RISK_SPAM for this reason"
+  },
+  {
+    "path": "/local/slider_form/ajax/preview_correo.php",
+    "method": "POST",
+    "allow": [
+      "A"
+    ],
+    "body": {},
+    "note": "renders the mail preview; semgrep flags a tainted callable at line 196 of this file"
+  },
+  {
+    "path": "/local/slider_form/ajax/saved_filters.php?action=list",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "saved recipient filters. The file documents them as per-administrator (created_by = $USER->id); this rule only asks whether a learner reaches the endpoint at all — whether one admin sees another's filters needs a second seeded admin. NOT MEASURABLE in the ephemeral Moodle: the endpoint opens the external 'zajunadb' and the PDO driver is absent (500 'could not find driver'). That external database is also where the 13 gitleaks hits come from"
+  },
+  {
+    "path": "/local/slider_form/ajax/export_envios.php?asunto=lab",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "exports the delivery history (recipient lists = personal data). 'asunto' required, same reason as table_logs"
+  },
+  {
+    "path": "/local/slider_form/ajax/categories.php?action=list",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "the only endpoint that never calls checkSession — it uses has_capability/is_siteadmin directly. 'action' is required"
+  }
+]

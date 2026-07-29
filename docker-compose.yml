@@ -76,6 +76,42 @@ services:
       - ./reports/${TARGET_NAME}/sonar:/reports
     command: ["-Dproject.settings=/opt/scan/sonar-project.properties", "-Dsonar.projectBaseDir=/usr/src"]
 
+  # Pull the analysis back OUT of the server. Every other tool in this lab writes a file the
+  # report can read; SonarQube writes to its own database and shows a web page, so its findings
+  # were invisible to gate, RUN.md and the report — a whole dimension that ran and then vanished.
+  # Reuses the sonarqube image (already pulled, ships curl) purely as a client; `run` publishes
+  # no ports, so this never collides with the server it is querying.
+  sonar-export:
+    profiles: ["static"]
+    image: sonarqube:community
+    depends_on:
+      sonarqube:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+      PROJECT_KEY: ${TARGET_NAME}
+    volumes:
+      - ./reports/${TARGET_NAME}/sonar:/reports
+    command:
+      - |
+        set -e
+        H="http://sonarqube:9000"
+        # The scanner returns as soon as it has UPLOADED; the server then processes the report
+        # asynchronously. Querying immediately returns the PREVIOUS analysis, or nothing at all.
+        for i in $$(seq 1 60); do
+          q=$$(curl -su "$$SONAR_TOKEN:" "$$H/api/ce/component?component=$$PROJECT_KEY")
+          echo "$$q" | grep -q '"pending":\[\]' && echo "$$q" | grep -q '"queue":\[\]' && break
+          sleep 2
+        done
+        curl -su "$$SONAR_TOKEN:" \
+          "$$H/api/issues/search?componentKeys=$$PROJECT_KEY&ps=500&resolved=false" \
+          -o /reports/issues.json
+        curl -su "$$SONAR_TOKEN:" \
+          "$$H/api/hotspots/search?projectKey=$$PROJECT_KEY&ps=500" \
+          -o /reports/hotspots.json
+        echo "sonar: exported issues.json + hotspots.json"
+
   # Linter image is chosen per target (qodana-php / qodana-python / qodana-js).
   qodana:
     profiles: ["static"]
@@ -235,6 +271,88 @@ services:
       - ./lib/k6:/seclab-lib:ro
       - ./reports/${TARGET_NAME}/k6:/reports
     command: ["run", "--summary-export=/reports/summary.json", "/scripts/smoke.js"]
+
+  # ---------- API contract (OpenAPI / Swagger) ----------
+  # The gap these two fill: every other tool here treats an HTTP API as a set of URLs to be
+  # discovered. ZAP spiders links — an API has none. Playwright drives the flows a person wrote
+  # down. So the endpoints nobody linked to, and the parameters nobody thought to send, are
+  # invisible to the whole lab. An OpenAPI document is the one artifact that enumerates them.
+  #
+  # spectral: is the DESCRIPTION itself sound — operations without security, bodies without a
+  # schema, responses that were never documented. Static: needs no running app.
+  api-lint:
+    profiles: ["static"]
+    image: stoplight/spectral:latest
+    volumes:
+      - ${SRC_PATH}:/src:ro
+      - ./targets/${TARGET_NAME}/spectral.yaml:/spectral.yaml:ro
+      - ./reports/${TARGET_NAME}/api:/reports
+    command: >
+      lint /src/${OPENAPI_SPEC:-openapi.json}
+      --ruleset /spectral.yaml
+      --format sarif --output /reports/spectral.sarif
+      --fail-severity error
+
+  # schemathesis: does the IMPLEMENTATION obey its own description. It derives cases from the
+  # schema — boundary values, wrong types, missing required fields — and flags any 500, any
+  # response that violates the documented schema, and any endpoint that answers without the auth
+  # it declares. That last one is the closest thing to an authorization test that can be
+  # automated, because here the expected behaviour was written down by the API's own authors.
+  api-fuzz:
+    profiles: ["api"]
+    image: schemathesis/schemathesis:stable
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./targets/${TARGET_NAME}/target.env
+    volumes:
+      - ${SRC_PATH}:/src:ro
+      - ./reports/${TARGET_NAME}/api:/reports
+    command: >
+      run ${OPENAPI_SPEC_URL:-/src/${OPENAPI_SPEC:-openapi.json}}
+      --url ${APP_INTERNAL_URL:-}
+      --checks all
+      --max-examples ${API_FUZZ_EXAMPLES:-50}
+      --report junit --report-junit-path /reports/schemathesis.xml
+
+  # A SECOND engine for the load dimension, not a new dimension. k6 stays the default: its
+  # scripts are code, they diff in review, and lib/k6 makes them portable between targets.
+  #
+  # JMeter earns its place for one reason — teams already HAVE .jmx plans, authored in the GUI,
+  # often the only executable description of a realistic user journey that exists. Rewriting one
+  # into JS to run it here would mean auditing a translation instead of the plan the team uses.
+  # It also speaks protocols k6 does not (JDBC, JMS, LDAP), which matters the day the thing under
+  # load is not HTTP.
+  #
+  # Load numbers are only comparable against a declared envelope — same rule as k6, so the
+  # thread group is overridden from target.env rather than trusted from inside the .jmx.
+  jmeter:
+    profiles: ["perf-jmeter"]
+    image: justb4/jmeter:5.5
+    user: "0:0"     # writes into /reports; same reasoning as the k6 service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - ./targets/${TARGET_NAME}/target.env
+    volumes:
+      - ./targets/${TARGET_NAME}/jmeter:/plans:ro
+      - ./reports/${TARGET_NAME}/jmeter:/reports
+    command:
+      - -n
+      - -t
+      - /plans/${JMETER_PLAN:-plan.jmx}
+      - -l
+      - /reports/results.jtl
+      - -e
+      - -o
+      - /reports/html
+      - -Jbase_url=${APP_INTERNAL_URL:-}
+      - -Jpaths=${JMETER_PATHS:-/}
+      - -Jusers=${JMETER_USERS:-10}
+      - -Jramp=${JMETER_RAMP:-10}
+      - -Jloops=${JMETER_LOOPS:-5}
+      - -Jrole_a_user=${ROLE_A_USER:-}
+      - -Jrole_a_pass=${ROLE_A_PASS:-}
 
   # ---------- e2e ----------
   # Specs come from two places: lib/specs (generic, every project) and the target's own

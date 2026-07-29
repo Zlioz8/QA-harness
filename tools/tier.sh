@@ -21,7 +21,7 @@ TARGET="${1:?usage: tier.sh <target>}"
 ENVFILE="targets/$TARGET/target.env"
 [ -f "$ENVFILE" ] || { echo "TIER=0"; echo "BLOCKED=all|no profile at $ENVFILE"; exit 0; }
 
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
+. "$(dirname "$0")/lib-env.sh"   # one parser for target.env — see the file for why
 
 SRC_PATH=$(envget SRC_PATH)
 BASE_URL=$(envget BASE_URL)

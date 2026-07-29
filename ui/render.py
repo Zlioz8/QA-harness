@@ -111,9 +111,12 @@ def target_page(name: str, tier: int, live: str, blocked: list[tuple[str, str]],
         for j in jobs[:12]
     ) or '<tr><td colspan="3">Sin corridas todavía.</td></tr>'
 
-    report = (f'<a class="btn primary" href="/t/{E(name)}/report">Ver informe</a>'
-              f'<a class="btn" href="/t/{E(name)}/triage">Triar hallazgos</a>'
+    # The findings explorer is offered whether or not the report has been built: it reads the
+    # artifacts directly, and it is where the raw output actually gets looked at.
+    report = (f'<a class="btn primary" href="/t/{E(name)}/findings">Explorar hallazgos</a>'
+              f'<a class="btn" href="/t/{E(name)}/report">Ver informe</a>'
               if has_report else
+              f'<a class="btn primary" href="/t/{E(name)}/findings">Explorar hallazgos</a>'
               '<span class="chip">aún no hay informe — corre algún análisis</span>')
 
     return page(f"QA-harness · {name}", f"""{flash(msg, kind)}
@@ -268,6 +271,244 @@ juzgados se pierde en cuanto quien lo hizo cierra la sesión.</div>
 <form method="post">{''.join(sections)}
 <div class="actions"><button class="btn primary" type="submit">Guardar triaje</button>
 <a class="btn" href="/t/{E(name)}">Volver</a></div></form>""", "home")
+
+
+_FINDINGS_CSS = """
+.fx .top{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.fx .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.fx .seg button{background:none;border:0;border-right:1px solid var(--line);padding:5px 11px;
+ font:inherit;font-size:12px;color:inherit;cursor:pointer}
+.fx .seg button:last-child{border-right:0}
+.fx .seg button.on{background:var(--accent,#2d6cdf);color:#fff}
+.fx .chips-active{display:flex;gap:6px;flex-wrap:wrap;min-height:26px;margin-bottom:10px}
+.fx .fchip{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);
+ border-radius:20px;padding:2px 6px 2px 10px;font-size:12px}
+.fx .fchip b{font-weight:600}
+.fx .fchip button{background:none;border:0;color:inherit;cursor:pointer;font-size:14px;
+ line-height:1;opacity:.6;padding:0 3px}
+.fx .g{border:1px solid var(--line);border-radius:9px;margin-bottom:10px;overflow:hidden}
+.fx .g>summary{cursor:pointer;padding:9px 12px;display:flex;gap:10px;align-items:center;
+ flex-wrap:wrap;list-style:none}
+.fx .g>summary::-webkit-details-marker{display:none}
+.fx .g>summary .gt{font-family:ui-monospace,monospace;font-size:13px;word-break:break-all}
+.fx .g>summary .n{margin-left:auto;opacity:.6;font-variant-numeric:tabular-nums}
+.fx .batch{display:flex;gap:6px;padding:0 12px 10px;flex-wrap:wrap;align-items:center;
+ font-size:12px}
+.fx .batch select,.fx .batch input{font-size:12px;padding:3px 6px}
+.fx .rows{padding:0 12px 10px}
+.fx .row{border-top:1px solid var(--line);padding:9px 0}
+.fx .row.hid,.fx .g.hid{display:none}
+.fx .row .hd{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:3px}
+.fx .row .loc{font-family:ui-monospace,monospace;font-size:12px;opacity:.85;word-break:break-all}
+.fx .row .msg{font-size:13px;opacity:.75;margin:3px 0}
+.fx .row .jd{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+.fx .row[data-verdict="false-positive"]{opacity:.5}
+.fx .f{cursor:pointer;border-bottom:1px dotted transparent}
+.fx .f:hover{border-bottom-color:currentColor}
+.fx .save{position:sticky;bottom:0;padding:10px 0;background:var(--bg);
+ border-top:1px solid var(--line);margin-top:10px;display:flex;gap:8px;align-items:center}
+"""
+
+# All state lives in the DOM. No framework, no build step — same reasoning as the rest of the UI.
+_FINDINGS_JS = """
+(function(){
+ var wrap=document.getElementById('fx-groups');
+ var rows=[].slice.call(document.querySelectorAll('.fx .row'));
+ var filters=[];              // [{field, value}] — AND across fields, OR within a field
+ var groupBy='rule';
+ var q=document.getElementById('fx-q');
+ var LBL={sev:'Severidad',tool:'Herramienta',dir:'Directorio',rule:'Regla',
+          verdict:'Triaje',path:'Archivo'};
+
+ function matches(r){
+   var by={};
+   filters.forEach(function(f){(by[f.field]=by[f.field]||[]).push(f.value);});
+   for(var k in by){ if(by[k].indexOf(r.dataset[k])<0) return false; }
+   var t=(q.value||'').toLowerCase();
+   return !t || r.dataset.hay.indexOf(t)>=0;
+ }
+
+ function drawChips(){
+   var c=document.getElementById('fx-chips');
+   c.innerHTML='';
+   filters.forEach(function(f,i){
+     var el=document.createElement('span');
+     el.className='fchip';
+     el.innerHTML='<span>'+(LBL[f.field]||f.field)+': <b></b></span>'+
+                  '<button type="button" title="Quitar">&times;</button>';
+     el.querySelector('b').textContent=f.value||'(sin juzgar)';
+     el.querySelector('button').onclick=function(){filters.splice(i,1);draw();};
+     c.appendChild(el);
+   });
+   document.getElementById('fx-clear').hidden=!filters.length&&!q.value;
+ }
+
+ function draw(){
+   drawChips();
+   var shown=rows.filter(matches);
+   // Rebuild the groups from scratch: one code path serves every grouping key, and the rows
+   // themselves are moved rather than re-rendered, so the verdict/note a user has already typed
+   // into an input survives regrouping.
+   wrap.innerHTML='';
+   var buckets={},order=[];
+   shown.forEach(function(r){
+     var k=r.dataset[groupBy]||'(vacío)';
+     if(!buckets[k]){buckets[k]=[];order.push(k);}
+     buckets[k].push(r);
+   });
+   order.sort(function(a,b){return buckets[b].length-buckets[a].length;});
+   order.forEach(function(k){
+     var d=document.createElement('details');
+     d.className='g'; d.open=order.length<=6;
+     var vs=['','confirmed','false-positive','inconclusive'];
+     var ls=['— sin juzgar —','Confirmado','Falso positivo','Inconcluso'];
+     var opts=vs.map(function(v,i){return '<option value="'+v+'">'+ls[i]+'</option>';}).join('');
+     d.innerHTML='<summary><span class="gt"></span><span class="n">'+buckets[k].length+
+       '</span></summary><div class="batch"><span>Juzgar los '+buckets[k].length+
+       ' de una vez:</span><select class="bv">'+opts+
+       '</select><input class="bn" type="text" placeholder="razón compartida" size="34">'+
+       '<button type="button" class="btn ba">Aplicar</button></div><div class="rows"></div>';
+     d.querySelector('.gt').textContent=k||'(sin valor)';
+     var box=d.querySelector('.rows');
+     buckets[k].forEach(function(r){box.appendChild(r);});
+     d.querySelector('.ba').onclick=function(){
+       var v=d.querySelector('.bv').value, n=d.querySelector('.bn').value;
+       buckets[k].forEach(function(r){
+         r.querySelector('select.v').value=v;
+         if(n) r.querySelector('input.n').value=n;
+         r.dataset.verdict=v;
+       });
+       dirty(); draw();
+     };
+     wrap.appendChild(d);
+   });
+   document.getElementById('fx-shown').textContent=shown.length;
+   document.getElementById('fx-groups-n').textContent=order.length;
+ }
+
+ function dirty(){document.getElementById('fx-dirty').hidden=false;}
+
+ function addFilter(field,value){
+   if(!filters.some(function(f){return f.field===field&&f.value===value;}))
+     filters.push({field:field,value:value});
+   draw();
+ }
+
+ // Any value on screen is a filter. This is what replaced the checkbox rail: the facets are
+ // wherever the data already is, so there is no second list to keep in sync with the first.
+ document.querySelector('.fx').addEventListener('click',function(e){
+   var el=e.target.closest('.f');
+   if(!el) return;
+   e.preventDefault();
+   addFilter(el.dataset.field,el.dataset.value);
+ });
+ [].slice.call(document.querySelectorAll('.seg button')).forEach(function(b){
+   b.onclick=function(){
+     groupBy=b.dataset.group;
+     [].slice.call(document.querySelectorAll('.seg button')).forEach(function(x){
+       x.classList.toggle('on',x===b);});
+     draw();
+   };
+ });
+ document.getElementById('fx-clear').onclick=function(){filters=[];q.value='';draw();};
+ q.addEventListener('input',draw);
+ document.querySelector('.fx').addEventListener('change',function(e){
+   if(e.target.matches('select.v')){e.target.closest('.row').dataset.verdict=e.target.value;
+     dirty();draw();}
+   else if(e.target.matches('input.n')) dirty();
+ });
+ draw();
+})();
+"""
+
+
+def findings_page(name: str, data: dict, msg: str = "") -> str:
+    """Every tool's findings in one place: grouped, filtered by clicking, judged in batches.
+
+    No checkbox rail. Grouping answers "what am I looking at" (13 hits of one rule are one
+    decision, not thirteen), and every value on screen doubles as a filter, so the facets live
+    where the data is instead of in a second list beside it. `data` comes from findings.collect().
+    """
+    from findings import SEV_LABEL, TOOL_LABEL, VERDICT_LABEL  # noqa: PLC0415
+
+    if not data["findings"]:
+        pend = [TOOL_LABEL.get(t, t) for t, n in data["ran"].items() if n is None]
+        why = ("Ninguna herramienta ha corrido todavía." if len(pend) == len(data["ran"])
+               else "Las herramientas que corrieron no encontraron nada.")
+        return page(f"QA-harness · {name} · hallazgos", f"""<h1>Hallazgos · {E(name)}</h1>
+<p class="sub">{E(why)}</p>
+<div class="note">Que una herramienta no encuentre nada y que no se haya ejecutado son cosas
+distintas. Sin ejecutar: {E(', '.join(pend) or 'ninguna')}.</div>
+<a class="btn" href="/t/{E(name)}">Volver</a>""", "home")
+
+    def f(field: str, value: str, text: str, cls: str = "") -> str:
+        """A value that is also a filter."""
+        return (f'<span class="f {cls}" data-field="{field}" data-value="{E(value)}">'
+                f'{E(text)}</span>')
+
+    rows = []
+    for it in data["findings"]:
+        opts = "".join(
+            f'<option value="{v}"{" selected" if it["verdict"] == v else ""}>{E(lbl)}</option>'
+            for v, lbl in VERDICT_LABEL.items())
+        line = f':{it["line"]}' if it.get("line") else ""
+        hay = " ".join([it["rule"], it["path"], it.get("msg", ""), it.get("name", "")]).lower()
+        rows.append(f"""<div class="row" data-sev="{it['sev']}" data-tool="{E(it['tool'])}"
+ data-verdict="{E(it['verdict'])}" data-rule="{E(it['rule'])}" data-dir="{E(it['dir'])}"
+ data-path="{E(it['path'])}" data-hay="{E(hay)}">
+<div class="hd">{f('sev', it['sev'], SEV_LABEL.get(it['sev'], it['sev']), 'sev ' + it['sev'])}
+{f('tool', it['tool'], TOOL_LABEL.get(it['tool'], it['tool']), 'chip')}
+{f('rule', it['rule'], it['rule'], 'rule')}</div>
+<div class="loc">{f('path', it['path'], it['path'] + line)}</div>
+<div class="msg">{E((it.get('msg') or '')[:260])}</div>
+<div class="jd"><select class="v" name="v__{E(it['key'])}" style="max-width:180px">{opts}</select>
+<input class="n" type="text" name="n__{E(it['key'])}" value="{E(it['note'])}"
+ placeholder="Por qué. Ej.: sólo aparece en docs/, no es una credencial viva"
+ style="flex:1;min-width:230px"></div></div>""")
+
+    not_run = [TOOL_LABEL.get(t, t) for t, n in data["ran"].items() if n is None]
+    banner = (f'<div class="note"><b>NO EJECUTADO:</b> {E(", ".join(not_run))}. '
+              'Lo que no corrió no aparece aquí, y no verlo no lo vuelve limpio.</div>'
+              if not_run else "")
+
+    def seg(g: str, lbl: str) -> str:
+        on = ' class="on"' if g == "rule" else ""
+        return f'<button type="button" data-group="{g}"{on}>{E(lbl)}</button>'
+
+    segs = "".join(seg(g, lbl) for g, lbl in
+                   [("rule", "Regla"), ("path", "Archivo"), ("dir", "Directorio"),
+                    ("sev", "Severidad"), ("tool", "Herramienta"), ("verdict", "Triaje")])
+
+    return page(f"QA-harness · {name} · hallazgos", f"""{flash(msg)}
+<h1>Hallazgos · {E(name)}</h1>
+<p class="sub">Todo lo que produjo cada herramienta, en una sola lista. Haz clic en cualquier
+valor para filtrar por él. Los artefactos originales no se tocan: filtrar es una forma de mirar,
+nunca de editar.</p>
+{banner}
+<style>{_FINDINGS_CSS}</style>
+<form method="post" class="fx">
+ <div class="top">
+  <span>Agrupar por:</span><span class="seg">{segs}</span>
+  <input type="search" id="fx-q" placeholder="Buscar…" style="flex:1;min-width:170px">
+  <button type="button" id="fx-clear" class="btn" hidden>Quitar filtros</button>
+ </div>
+ <div class="chips-active" id="fx-chips"></div>
+ <div class="top">
+  <span>Mostrando <b id="fx-shown">{data['total']}</b> de <b>{data['total']}</b> hallazgos en
+   bruto, en <b id="fx-groups-n">0</b> grupos</span>
+  <span class="chip">confirmados {data['judged'].get('confirmed', 0)}</span>
+  <span class="chip">falsos positivos {data['judged'].get('false-positive', 0)}</span>
+  <span class="chip">inconclusos {data['judged'].get('inconclusive', 0)}</span>
+ </div>
+ <div id="fx-groups"></div>
+ <div class="save">
+  <button class="btn primary" type="submit">Guardar triaje y regenerar informe</button>
+  <span id="fx-dirty" hidden class="chip">cambios sin guardar</span>
+  <a class="btn" href="/t/{E(name)}">Volver</a>
+ </div>
+ <div hidden id="fx-src">{''.join(rows)}</div>
+</form>
+<script>{_FINDINGS_JS}</script>""", "home")
 
 
 def detect_page(name: str, output: str) -> str:

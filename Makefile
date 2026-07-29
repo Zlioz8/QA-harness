@@ -32,7 +32,7 @@ guard:
 
 .PHONY: help list new detect doctor guard require-live clone up down purge status gate dashboard run-manifest ui ui-stop ui-logs \
         sonar qodana semgrep secrets deps config-scan image-scan sbom static \
-        build dast perf e2e live all
+        build dast perf perf-jmeter e2e live all api-lint api-fuzz
 
 help:             ##[admin] show this list, grouped by what each goal needs
 	@echo ""
@@ -86,9 +86,23 @@ semgrep: guard    ##[code] polyglot SAST with taint tracking
 sonar: guard      ##[code] SonarQube server + scanner
 	$(DC) --profile static up -d sonarqube
 	$(DC) --profile static run --rm sonar-scanner
+	@# Without this the analysis exists only inside the server: absent from the gate, from
+	@# RUN.md and from the report. A dimension that ran and left no artifact is indistinguishable
+	@# from one that never ran, which is the failure this lab keeps insisting must not happen.
+	$(DC) --profile static run --rm sonar-export
+	@tools/sonar-sarif.py $(REPORTS)/sonar
 
 qodana: guard     ##[code] JetBrains Qodana (image chosen by QODANA_IMAGE in target.env)
-	$(DC) --profile static run --rm qodana
+	@# `QODANA_IMAGE=` empty means "this project has no Qodana linter", which the template has
+	@# always said. It was never implemented: compose received an empty image name and `static`
+	@# died here, before sonar. Not every language has a Qodana image (PHP has no community one),
+	@# so this is a normal state, not an error — but it is a SKIP, and a skip is not a pass:
+	@# run-manifest and the report keep reading the absent artifact as NOT RUN.
+	@if [ -z "$$(sed -n 's/^QODANA_IMAGE=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')" ]; then \
+	  echo "qodana: QODANA_IMAGE is empty — skipped (declared as not applicable for this target)"; \
+	else \
+	  $(DC) --profile static run --rm qodana; \
+	fi
 
 static: secrets deps config-scan sbom semgrep qodana sonar  ##[code] every static tool
 
@@ -111,6 +125,36 @@ dast: guard require-live       ##[live] OWASP ZAP against the running app
 
 perf: guard require-live       ##[live] k6 load test
 	$(DC) --profile perf run --rm k6
+
+perf-jmeter: guard require-live ##[live] load with an existing JMeter .jmx plan (second engine)
+	@# Not a substitute for `perf`. It exists so a team's own .jmx — usually the only executable
+	@# description of a realistic journey they have — can be run as authored instead of rewritten.
+	@test -f targets/$(TARGET)/jmeter/$${JMETER_PLAN:-plan.jmx} \
+	  || { echo "no plan at targets/$(TARGET)/jmeter/ — JMeter measures nothing without one."; \
+	       echo "NOT AVAILABLE for this profile (which is not the same as 'no findings')."; exit 2; }
+	@# JMeter refuses to start when results.jtl already exists ("is not empty") and refuses to
+	@# write into a non-empty -o directory. Both abort the run BEFORE any request is made, so the
+	@# previous run's numbers stay on disk and the operator reads a stale report as a fresh one.
+	@rm -rf $(REPORTS)/jmeter/results.jtl $(REPORTS)/jmeter/html
+	$(DC) --profile perf-jmeter run --rm jmeter
+	@echo "JMeter report: $(REPORTS)/jmeter/html/index.html"
+
+api-lint: guard   ##[code] Spectral: is the OpenAPI description itself sound
+	@# The spec is part of the repository, so this needs no running app. Absent spec = the
+	@# dimension is NOT AVAILABLE, which the manifest records differently from NOT RUN.
+	@if [ -z "$$(sed -n 's/^OPENAPI_SPEC=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')" ]; then \
+	  echo "api-lint: OPENAPI_SPEC is empty — this project publishes no OpenAPI document."; \
+	  echo "          NOT AVAILABLE, not skipped: there is nothing to lint."; \
+	else \
+	  $(DC) --profile static run --rm api-lint; \
+	fi
+
+api-fuzz: guard require-live   ##[live] Schemathesis: does the API obey its own contract
+	@if [ -z "$$(sed -n 's/^OPENAPI_SPEC=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')$$(sed -n 's/^OPENAPI_SPEC_URL=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')" ]; then \
+	  echo "api-fuzz: no OPENAPI_SPEC / OPENAPI_SPEC_URL — NOT AVAILABLE for this profile."; \
+	else \
+	  $(DC) --profile api run --rm api-fuzz; \
+	fi
 
 e2e: guard require-live        ##[live] Playwright functional / authz flows
 	$(DC) --profile e2e run --rm playwright

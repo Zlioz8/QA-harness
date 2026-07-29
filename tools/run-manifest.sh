@@ -13,7 +13,7 @@ ENVFILE="targets/$TARGET/target.env"
 # spaces — a path like /opt/MANUALES DE DESPLIEGUE/... silently becomes a command, SRC_PATH ends
 # up empty, and the manifest then records "(not a git checkout)" for a perfectly normal git repo.
 # A manifest that misreports which commit was audited is worse than no manifest.
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
+. "$(dirname "$0")/lib-env.sh"   # one parser for target.env — see the file for why
 SRC_PATH=$(envget SRC_PATH)
 PERF_CPUS=$(envget PERF_CPUS)
 PERF_MEM=$(envget PERF_MEM)
@@ -43,9 +43,13 @@ branch=$(git -C "${SRC_PATH:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo
   chk "Image CVE"             "trivy/trivy-image.sarif"
   chk "SBOM"                  "sbom/sbom.spdx.json"
   chk "SAST (semgrep)"        "semgrep/semgrep.sarif"
+  chk "Quality (SonarQube)"   "sonar/sonar.sarif"
   chk "Quality (qodana)"      "qodana/report/index.html"
+  chk "API contract (Spectral)" "api/spectral.sarif"
+  chk "API fuzz (Schemathesis)" "api/schemathesis.xml"
   chk "DAST (ZAP)"            "zap/zap-report.html"
   chk "Load (k6)"             "k6/summary.json"
+  chk "Load (JMeter)"         "jmeter/results.jtl"
   chk "E2E / authz"           "playwright/results.json"
   echo
   echo "## Tool images (pin these to digests for a reproducible re-run)"

@@ -17,7 +17,7 @@ docker compose version >/dev/null 2>&1 && ok "compose: $(docker compose version 
 # Read target.env WITHOUT sourcing it. Sourcing breaks on any unquoted value containing
 # spaces (a path like /opt/MANUALES DE DESPLIEGUE/... silently becomes a command), and it
 # would also execute whatever a target profile happens to contain.
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" | tail -1 | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
+. "$(dirname "$0")/lib-env.sh"   # one parser for target.env — see the file for why
 SRC_PATH=$(envget SRC_PATH)
 ROLE_A_USER=$(envget ROLE_A_USER); ROLE_B_USER=$(envget ROLE_B_USER)
 AUTH_ADAPTER=$(envget AUTH_ADAPTER); HEALTH_PATH=$(envget HEALTH_PATH); BASE_URL=$(envget BASE_URL)
@@ -61,12 +61,44 @@ else
 fi
 
 # Ports, bound to loopback only (lab finding L1).
+#
+# Two listeners, two ways of seeing them. `ss` reports this namespace's sockets: right on the
+# host, blind in a container — and `make doctor` DOES run inside one when the web UI launches it,
+# where `ss` is not even installed. The old check read that silence as "free" and cheerfully
+# cleared a port already held by another target's SonarQube; the run then died later, in Sonar,
+# looking like a Sonar bug. So ask Docker too: published ports are visible through the socket
+# from anywhere, and a residual container from another profile is the common case.
+docker_holds_port() {
+  docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE ":$1->"
+}
+HAVE_SS=0; command -v ss >/dev/null 2>&1 && HAVE_SS=1
 for p in ${SONAR_PORT:-9000} ${APP_PORT:-} ${FRONTEND_PORT:-} ${PROD_PORT:-} ${MOODLE_PORT:-}; do
   [ -z "$p" ] && continue
-  if ss -ltn 2>/dev/null | grep -q ":$p "; then warn "port $p already in use"; else ok "port $p free"; fi
+  holder=""
+  [ "$HAVE_SS" = 1 ] && ss -ltn 2>/dev/null | grep -q ":$p " && holder="a local process"
+  if docker_holds_port "$p"; then
+    holder=$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+             | grep -E ":$p->" | cut -f1 | head -1)
+    holder="container '$holder'"
+  fi
+  if [ -n "$holder" ]; then warn "port $p already in use by $holder — 'make down TARGET=<other>'"
+  elif [ "$HAVE_SS" = 1 ]; then ok "port $p free"
+  else warn "port $p: cannot verify from here (no 'ss'); only published containers were checked"
+  fi
 done
 if ss -ltn 2>/dev/null | grep -qE '0\.0\.0\.0:(9000|8000|8099|8100|5173)'; then
   bad "a lab port is listening on 0.0.0.0 — the lab may hold real data (finding L1)"
+fi
+
+# Inline comments: the one place where this lab's own tools disagree with each other.
+# lib-env.sh strips ` # ...`; `docker compose --env-file` keeps it as part of the value. So
+# `QODANA_IMAGE=  # not applicable` is empty to doctor/tier/gate and a literal image name to
+# compose, which then fails with "invalid reference format" from a file that looks correct.
+BADLINES=$(env_inline_comments "$ENVFILE")
+if [ -n "$BADLINES" ]; then
+  warn "inline comments in target.env — compose reads them as part of the VALUE:"
+  echo "$BADLINES" | sed 's/^/          line /'
+  echo "        Move the comment to its own line above the variable."
 fi
 
 mkdir -p "reports/$TARGET" 2>/dev/null

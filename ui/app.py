@@ -314,6 +314,40 @@ async def triage_post(target: str, request: Request):
     return render.triage_page(target, blocks, counts, "Triaje guardado e informe regenerado.")
 
 
+@app.get("/t/{target}/findings", response_class=HTMLResponse)
+def findings_get(target: str, msg: str = ""):
+    if not valid_target(target):
+        return RedirectResponse("/", status_code=303)
+    import findings as findlib  # noqa: PLC0415 - needs LAB on the path
+
+    return render.findings_page(target, findlib.collect(os.path.join(REPORTS, target)), msg)
+
+
+@app.post("/t/{target}/findings", response_class=HTMLResponse)
+async def findings_post(target: str, request: Request):
+    """Same store as /triage: a verdict is a verdict, whichever screen recorded it."""
+    if not valid_target(target):
+        return RedirectResponse("/", status_code=303)
+    sys.path.insert(0, os.path.join(LAB, "tools"))
+    import findings as findlib  # noqa: PLC0415
+    import triage as triagelib  # noqa: PLC0415
+
+    form = await request.form()
+    entries: dict[str, dict] = {}
+    for field, value in form.items():
+        if field.startswith("v__"):
+            entries.setdefault(field[3:], {})["verdict"] = str(value)
+        elif field.startswith("n__"):
+            entries.setdefault(field[3:], {})["note"] = str(value)
+
+    rep = os.path.join(REPORTS, target)
+    triagelib.save(rep, entries)
+    subprocess.run(["make", "dashboard", f"TARGET={target}"], cwd=LAB,
+                   capture_output=True, timeout=120)
+    return render.findings_page(target, findlib.collect(rep),
+                                "Triaje guardado e informe regenerado.")
+
+
 @app.get("/t/{target}/report")
 def report(target: str):
     if not valid_target(target):

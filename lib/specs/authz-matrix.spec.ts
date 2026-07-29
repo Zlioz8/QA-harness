@@ -42,18 +42,41 @@ test.describe('authorization matrix', () => {
         // prefix (https://host/mobile/api -> https://host/grades/x -> 404). Concatenation
         // keeps the prefix, and is correct for path-less bases too (http://moodle:8080 + /x).
         const url = /^https?:\/\//.test(rule.path) ? rule.path : `${BASE}${rule.path}`;
+        // maxRedirects: 0 is load-bearing, not a detail.
+        //
+        // Server-rendered applications deny by REDIRECTING — Moodle answers 303 to the login or
+        // permission page, Laravel 302 to /login. Following that redirect lands on a page that
+        // renders perfectly well and returns 200, so every correct denial was being recorded as
+        // "the low-privilege account reached it": a false bypass, reported with total confidence,
+        // on exactly the dimension this lab exists to measure. Verified against
+        // local_slider_form, where nine screens denied role B with 303 and the suite called all
+        // nine a finding.
         const res = await ctx.fetch(url, {
           method,
+          maxRedirects: 0,
           ...(rule.body !== undefined
             ? { data: rule.body, headers: { 'Content-Type': 'application/json' } }
             : {}),
         });
+        const status = res.status();
+        // Where a 3xx GOES decides what it means: to a login or permission page it is a denial;
+        // anywhere else it is ordinary navigation and the request did succeed.
+        const location = res.headers()['location'] ?? '';
+        const isDenialRedirect =
+          status >= 300 && status < 400 &&
+          /login|denied|forbidden|permission|nopermission|accessdenied/i.test(location);
+
         if (should) {
-          expect(res.status(), 'legitimate access must not be blocked').toBeLessThan(400);
+          expect(status, `legitimate access must not be blocked (Location: ${location || 'none'})`)
+            .toBeLessThan(400);
+          expect(isDenialRedirect,
+            `role ${role} was redirected to a login/permission page: ${location}`).toBe(false);
         } else {
-          // 200 here is the finding: the low-privilege account reached something it must not.
-          expect([401, 403, 404], `role ${role} reached ${rule.path} with ${res.status()}`)
-            .toContain(res.status());
+          // A denial is either an explicit refusal status or a redirect to a login/permission
+          // page. Anything else means the account reached what it must not.
+          expect(isDenialRedirect || [401, 403, 404].includes(status),
+            `role ${role} reached ${rule.path} with ${status}` +
+            (location ? ` (Location: ${location})` : '')).toBe(true);
         }
       });
     }

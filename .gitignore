@@ -18,3 +18,14 @@ __pycache__/
 *.pyc
 node_modules/
 .venv/
+
+# Profiles whose accounts are REAL, not lab-synthetic. targets/*/target.env is meant to be
+# versioned — it is the contract between the lab and a project — but that only holds while the
+# credentials in it are throwaway. `movil` carries actual Zajuna logins (national ID numbers and
+# personal passwords) because that stack has no synthetic accounts to test authorization with.
+# Publishing them is irreversible: a push to a hosted remote writes them into history for good.
+# Rule: a profile whose ROLE_A_/ROLE_B_ are real accounts stays out of the repository.
+targets/movil/
+
+# Editor settings — not part of the lab.
+.vscode/

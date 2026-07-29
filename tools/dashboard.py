@@ -284,6 +284,11 @@ def build(target, root):
         ("CVE de imágenes", "Trivy image", load_sarif(f"{rep}/trivy/trivy-image.sarif", "trivy-image"),
          "trivy/trivy-image.sarif"),
         ("SAST", "semgrep", load_sarif(f"{rep}/semgrep/semgrep.sarif", "semgrep"), "semgrep/semgrep.sarif"),
+        # Exported from the server by `make sonar`; before that it analysed and left nothing behind.
+        ("Calidad (SonarQube)", "SonarQube", load_sarif(f"{rep}/sonar/sonar.sarif", "sonar"),
+         "sonar/sonar.sarif"),
+        ("Contrato de API (OpenAPI)", "Spectral", load_sarif(f"{rep}/api/spectral.sarif", "api-lint"),
+         "api/spectral.sarif"),
         ("Superficie runtime (DAST)", "OWASP ZAP", load_sarif(f"{rep}/zap/zap-report.json", "zap"),
          "zap/zap-report.html"),
     ]
