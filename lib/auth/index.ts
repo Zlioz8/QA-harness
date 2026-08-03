@@ -31,6 +31,15 @@ export const CREDS: Record<Role, { user: string; pass: string }> = {
 export const u = (path: string): string =>
   /^https?:\/\//.test(path) ? path : `${BASE}${path}`;
 
+// UNA sesión por rol y por worker, memorizada.
+//
+// Cada spec llamaba a loginAs() en cada prueba. Contra un backend con limitador de intentos
+// —Costos Web: 10 por minuto y por email+IP, que es justo lo que R5 pidió añadir— la suite se
+// autodenegaba: a partir del intento 11 el login devolvía 429, loginAs lanzaba, y decenas de
+// pruebas de autorización se reportaban como FALLO cuando lo único roto era el ritmo del propio
+// laboratorio. Un falso positivo masivo sobre la dimensión que este laboratorio existe para medir.
+const sesiones = new Map<string, Promise<APIRequestContext>>();
+
 export interface AuthAdapter {
   name: string;
   loginAs(role: Role): Promise<APIRequestContext>;
@@ -39,9 +48,19 @@ export interface AuthAdapter {
 }
 
 async function newCtx(): Promise<APIRequestContext> {
+  // `Accept: application/json` en los adaptadores de API. Sin ella, un framework como Laravel
+  // responde a la peticion no autenticada con un 302 al login en vez de un 401: la matriz de
+  // autorizacion ve una redireccion a una pagina que existe y no puede distinguir denegacion de
+  // exito. No se envia en los adaptadores que raspan HTML (moodle-session), donde romperia.
+  const quiereJson = ['sanctum', 'jwt-bearer', 'basic'].includes(
+    (process.env.AUTH_ADAPTER || '').trim(),
+  );
   return pwRequest.newContext({
     baseURL: BASE,
-    extraHTTPHeaders: ORIGIN ? { Origin: ORIGIN } : {},
+    extraHTTPHeaders: {
+      ...(ORIGIN ? { Origin: ORIGIN, Referer: `${BASE}/` } : {}),
+      ...(quiereJson ? { Accept: 'application/json' } : {}),
+    },
     ignoreHTTPSErrors: true,
   });
 }
@@ -198,5 +217,14 @@ export function adapter(): AuthAdapter {
   return a;
 }
 
-export const loginAs = (role: Role) => adapter().loginAs(role);
+export const loginAs = (role: Role): Promise<APIRequestContext> => {
+  const clave = `${adapter().name}:${role}`;
+  let s = sesiones.get(clave);
+  if (!s) {
+    s = adapter().loginAs(role);
+    sesiones.set(clave, s);
+  }
+  return s;
+};
+export const writeHeaders = (ctx: APIRequestContext) => adapter().writeHeaders(ctx);
 export const hasRole = (role: Role) => Boolean(CREDS[role].user && CREDS[role].pass);

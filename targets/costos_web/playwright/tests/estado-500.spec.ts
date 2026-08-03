@@ -7,7 +7,8 @@ import { loginAs, xsrfHeader, CREDS } from './_auth';
 // método. (El cambio de estado se realiza vía `PUT /api/usuarios/{id}`.)
 test('estado endpoint no longer throws a server error (H27)', async () => {
   const admin = await loginAs(CREDS.admin.email, CREDS.admin.pass);
-  const res = await admin.put('/api/usuarios/2/estado', {
+  const objetivo = process.env.COORD_INTEGRANTE_ID || '15505';   // el id 2 no existe en este volcado
+  const res = await admin.put(`/api/usuarios/${objetivo}/estado`, {
     headers: await xsrfHeader(admin),
     data: { estado: false },
   });
@@ -19,7 +20,8 @@ test('estado endpoint no longer throws a server error (H27)', async () => {
 // Control: el estado sí se puede cambiar por el endpoint de actualización.
 test('estado can be updated through the user update endpoint', async () => {
   const admin = await loginAs(CREDS.admin.email, CREDS.admin.pass);
-  const res = await admin.put('/api/usuarios/2', {
+  const objetivo = process.env.COORD_INTEGRANTE_ID || '15505';
+  const res = await admin.put(`/api/usuarios/${objetivo}`, {
     headers: await xsrfHeader(admin),
     data: { estado: true },
   });

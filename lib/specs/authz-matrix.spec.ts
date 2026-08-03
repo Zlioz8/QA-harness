@@ -13,11 +13,19 @@
 //   ]
 //
 // "allow" lists the roles that SHOULD succeed. Every other role must be denied (401/403/404).
+//
+// ADVERTENCIA SOBRE ESCRITURAS. El motor ejecuta cada regla con TODOS los roles, incluido el
+// permitido, porque un endpoint que deniega a quien tiene derecho también es un hallazgo. Con un
+// metodo de escritura eso no es una comprobacion: es la mutacion real. En costos_web una regla
+// PUT {rol_id:1} ascendio a la cuenta de menor privilegio a administradora y, con ese privilegio,
+// otra spec borro la cuenta administradora del entorno de pruebas. Regla practica: en esta matriz,
+// escrituras SOLO contra objetivos desechables que la propia suite cree y destruya; las que tocan
+// datos del proyecto van en una spec del target, que puede restaurar lo que toca.
 // A missing file means the dimension was not tested — it is reported as skipped, never as passed.
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 // This file lives at lib/specs/, so the adapter is one directory up.
-import { loginAs, hasRole, Role, BASE } from '../auth/index';
+import { loginAs, hasRole, writeHeaders, Role, BASE } from '../auth/index';
 
 // `body` is optional: GET rules omit it (antiplagio-style path+query); JSON APIs whose
 // authorization lives on POST endpoints supply it so the request is well-formed and the
@@ -27,7 +35,14 @@ type Rule = { path: string; method?: string; allow: Role[]; note?: string; body?
 const FILE = 'authz-matrix.json';
 const rules: Rule[] = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : [];
 
+// Ritmo opcional entre comprobaciones. Un backend con limitador por usuario (Costos Web:
+// throttle:60,1) responde 429 a una matriz que dispara decenas de peticiones seguidas, y ese
+// 429 se lee como denegacion: la matriz acaba midiendo el limitador en vez de la autorizacion.
+// El perfil declara E2E_PACE_MS cuando su aplicacion lo necesita; por defecto no hay espera.
+const PACE = Number(process.env.E2E_PACE_MS || 0);
+
 test.describe('authorization matrix', () => {
+  test.beforeEach(async () => { if (PACE) await new Promise((r) => setTimeout(r, PACE)); });
   test.skip(rules.length === 0, `no ${FILE} in this target — authorization NOT tested`);
   test.skip(!hasRole('A') || !hasRole('B'), 'needs two accounts of different privilege');
 
@@ -51,12 +66,16 @@ test.describe('authorization matrix', () => {
         // on exactly the dimension this lab exists to measure. Verified against
         // local_slider_form, where nine screens denied role B with 303 and the suite called all
         // nine a finding.
+        // Las escrituras necesitan la cabecera CSRF del adaptador. Sin ella, Laravel responde
+        // 419 "CSRF token mismatch" ANTES de evaluar el rol: la regla queda medida contra el
+        // guardia equivocado y un endpoint mal protegido pasaría por bien protegido.
+        const esEscritura = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+        const csrf = esEscritura ? await writeHeaders(ctx) : {};
         const res = await ctx.fetch(url, {
           method,
           maxRedirects: 0,
-          ...(rule.body !== undefined
-            ? { data: rule.body, headers: { 'Content-Type': 'application/json' } }
-            : {}),
+          headers: { ...csrf, ...(rule.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+          ...(rule.body !== undefined ? { data: rule.body } : {}),
         });
         const status = res.status();
         // Where a 3xx GOES decides what it means: to a login or permission page it is a denial;

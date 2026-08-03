@@ -14,9 +14,26 @@
 # `# not applicable` inside compose, which then tries to pull an image by that name. Same file,
 # two meanings. Until compose changes, the rule is: no inline comments in target.env. doctor.sh
 # enforces it, and this is the reason.
-envget() {
-  sed -n "s/^${1}=//p" "${2:-$ENVFILE}" 2>/dev/null | tail -1 \
+#
+# OVERRIDE LOCAL: <archivo>.local gana, si existe y si trae la clave con un valor no vacío.
+# Es la contraparte de los dos `--env-file` que pasa el Makefile — sin esto, compose y las
+# herramientas leerían perfiles distintos, que es exactamente el desacuerdo que este módulo
+# existe para impedir. Un valor VACÍO en el .local no anula: `QODANA_IMAGE=` en el contrato
+# significa "no aplica, salto documentado", y un .local incompleto no debe convertir eso en otra
+# cosa. Para tapar una clave, se le da valor; para heredarla, se omite.
+_envget1() {
+  sed -n "s/^${1}=//p" "$2" 2>/dev/null | tail -1 \
     | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'
+}
+
+envget() {
+  local f v
+  f="${2:-$ENVFILE}"
+  if [ -f "$f.local" ]; then
+    v=$(_envget1 "$1" "$f.local")
+    [ -n "$v" ] && { printf '%s\n' "$v"; return; }
+  fi
+  _envget1 "$1" "$f"
 }
 
 # Every line whose value carries an inline comment — the divergence above, made visible.

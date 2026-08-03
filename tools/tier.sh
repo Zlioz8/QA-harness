@@ -43,7 +43,12 @@ fi
 if [ -z "$BASE_URL" ] || [ -z "$HEALTH_PATH" ]; then
   LIVE=unconfigured
 else
-  CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${BASE_URL%/}${HEALTH_PATH}" 2>/dev/null)
+  # -k deliberado, y consistente con tools/require-live.sh, que ya lo usaba: esta sonda solo
+  # responde "¿hay algo vivo ahí?". Un certificado autofirmado —lo normal en preproducción— hacía
+  # que este chequeo dijera "unreachable" mientras require-live.sh decía "ok": dos medidas de lo
+  # mismo en desacuerdo, y el peldaño 2 quedaba bloqueado sobre un despliegue sano.
+  # La validez del TLS la juzga la dimensión DAST, que sabe reportarla como hallazgo.
+  CODE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "${BASE_URL%/}${HEALTH_PATH}" 2>/dev/null)
   [ "$CODE" = "200" ] && LIVE=ok || LIVE=unreachable
 fi
 echo "LIVE=$LIVE"

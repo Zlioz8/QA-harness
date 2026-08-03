@@ -21,8 +21,11 @@ SECURITY-LAB/
   tools/                 new · detect · doctor · gate · run-manifest · status
   recipes/               bloques de arranque reutilizables (postgres, moodle-plugin, fastapi-uvicorn, kafka-zk)
   lib/auth/              adaptadores de autenticación (sanctum, moodle-session, jwt-bearer, basic, none)
-  lib/specs/             pruebas genéricas que hereda todo proyecto (cabeceras, matriz de autorización)
-  targets/<nombre>/      el perfil de un proyecto: target.env, compose.runtime.yml, zap/, k6/, playwright/, db-init/
+  lib/specs/             pruebas genéricas que hereda todo proyecto (cabeceras, matriz de autorización,
+                         presupuesto del hilo principal)
+  lib/semgrep/           reglas SAST propias del laboratorio, por pila (laravel-vue.yml)
+  targets/<nombre>/      el perfil de un proyecto: target.env, target.env.local, compose.runtime.yml,
+                         zap/, k6/, playwright/, db-init/
   reports/<nombre>/      salidas + RUN.md (qué se ejecutó y qué NO)
 ```
 
@@ -92,6 +95,29 @@ Para las dimensiones dinámicas (peldaño 2) hay que aportar además:
 - `playwright/authz-matrix.json`: qué rol puede alcanzar qué. **Ninguna herramienta lo sabe.**
 - Un escenario sembrado (los datos sobre los que la operación autorizada sí funciona).
 
+### Dónde van las credenciales: `target.env` vs `target.env.local`
+
+`target.env` **se versiona**: es el contrato del perfil — qué variables existen y qué significa cada
+una. `target.env.local`, a su lado, **nunca** entra en git (`.gitignore`) y es el único sitio donde
+van los valores que no pueden salir del equipo: la URL del despliegue interno y las contraseñas.
+
+```bash
+cp targets/proyecto_x/target.env.local.example targets/proyecto_x/target.env.local
+$EDITOR targets/proyecto_x/target.env.local     # aquí sí, valores reales
+```
+
+El `.local` se carga **encima** del contrato y gana clave a clave: el `Makefile` pasa los dos
+`--env-file` a compose, cada servicio lo declara como `env_file` opcional, y `tools/lib-env.sh` lo
+consulta primero. Una clave vacía en el `.local` **no** anula: `QODANA_IMAGE=` en el contrato
+significa «no aplica, salto documentado», y un `.local` a medio rellenar no debe convertir eso en
+otra cosa. Para tapar una clave se le da valor; para heredarla, se omite.
+
+Un perfil no nace con credenciales reales — se vuelve peligroso el día que deja de apuntar a
+`localhost` con cuentas sembradas y se le apunta a un despliegue de validación. Ese es el momento
+de mover los valores al `.local`; **publicar una credencial en un remoto alojado la escribe en el
+historial para siempre.** Sin el `.local`, el perfil sigue siendo válido: las dimensiones `[code]`
+corren igual y las `[live]` se detienen en `require-live` en vez de fingir que pasaron.
+
 Solo si quieres el peldaño 3 escribes `compose.runtime.yml`, componiendo `recipes/` con `include:`
 (rutas relativas al **directorio del proyecto**).
 
@@ -142,8 +168,51 @@ Tres decisiones deliberadas de esa página:
 | Superficie runtime | OWASP ZAP | `make dast` | **sí** |
 | Autorización y flujos | Playwright | `make e2e` | **sí** |
 | Carga | k6 | `make perf` | **sí** |
+| Presupuesto del hilo principal | Playwright + CDP | `make budget` | **sí** |
 
 `make static` corre todo lo `[code]`; `make live`, todo lo `[live]`.
+
+### Reglas SAST propias (`lib/semgrep/`)
+
+Los paquetes públicos de semgrep buscan vulnerabilidades **clásicas** — inyección, XSS, criptografía.
+No conocen los modos de fallo del **framework**, que rompen un despliegue en producción sin ser
+vulnerabilidades y por eso ninguna herramienta del laboratorio los veía. `lib/semgrep/laravel-vue.yml`
+codifica dos defectos reales encontrados a mano (`env()` fuera de `config/`, que devuelve `null` en
+cuanto corre `php artisan config:cache` — es decir, solo en producción; y las rutas absolutas a
+`assets` que sobreviven al `build` de Vite). Un perfil las activa añadiendo
+`--config=/seclab-lib/semgrep/laravel-vue.yml` a su `SEMGREP_CONFIG`.
+
+### Presupuesto del hilo principal (`make budget`)
+
+La dimensión que faltaba: **el navegador**. k6 mide el servidor, ZAP mide cabeceras, la matriz mide
+permisos — y con los tres en verde la pestaña del usuario puede seguir congelándose, porque el
+trabajo caro ocurre en su equipo, no en el tuyo. Esta prueba rastrea el bundle **entero** (no solo la
+pantalla actual), cuenta **megapíxeles descodificados** en vez de bytes —que es lo que predice el
+bloqueo, y lo que delata una «optimización» que recomprime sin redimensionar— y mide con la **CPU
+frenada** ×4, que convierte «a mí me funciona» en un número. Umbrales y validación de la propia
+herramienta: [`lib/specs/README-main-thread-budget.md`](lib/specs/README-main-thread-budget.md).
+
+### Si la aplicación limita peticiones, decláralo (`E2E_PACE_MS`)
+
+Una suite que inicia sesión en cada prueba se atropella a sí misma contra cualquier backend con
+limitador: pasado el umbral el login devuelve `429`, la comprobación lo lee como «acceso denegado» y
+el laboratorio reporta un falso positivo masivo **sobre la dimensión que existe para medir**. En
+Costos Web fueron 59 fallos de autorización inexistentes. Tres medidas, ya en el núcleo:
+
+- La sesión de cada rol se abre **una vez** y se reutiliza (`lib/auth`, memorizada por adaptador+rol).
+- `workers: 1` en el perfil, porque cada worker es un proceso con su propia caché — N workers son N
+  inicios de sesión por rol. Y `retries: 0`: un fallo intermitente de autorización es un hallazgo,
+  no ruido que reintentar hasta que salga verde.
+- `E2E_PACE_MS` en `target.env` espacia las comprobaciones de la matriz. Por defecto no hay espera;
+  se declara solo en los perfiles cuya aplicación lo necesita.
+
+**Y en la matriz, cuidado con las escrituras.** El motor ejecuta cada regla con **todos** los roles,
+incluido el permitido — un endpoint que deniega a quien tiene derecho también es un hallazgo. Con un
+`PUT` eso no es una comprobación: es la mutación real. Una regla `PUT {rol_id:1}` ascendió a la
+cuenta de menor privilegio a administradora, y con ese privilegio otra spec borró la cuenta
+administradora del entorno. Regla: en `authz-matrix.json`, escrituras **solo** contra objetivos
+desechables o inexistentes; las que tocan datos del proyecto van en una spec del perfil, que puede
+restaurar lo que toca.
 
 ---
 
@@ -180,6 +249,12 @@ servicios sin endurecer: es un activo sensible, no una carpeta de trabajo.
 - Todos los puertos publicados se atan a `127.0.0.1`. Es un invariante del núcleo — no lo cambies.
 - Preferir semillas **sintéticas**. Un volcado de producción sólo se justifica para reproducir un
   comportamiento dependiente del volumen, y con fecha de caducidad.
+- **Ninguna credencial real, ni ninguna dirección de infraestructura interna, en un archivo
+  versionado.** Van en `targets/<perfil>/target.env.local` (ver arriba). Tampoco incrustadas como
+  valor por defecto en una spec: un `process.env.BASE_URL || 'https://10.0.0.5'` sobrevive al
+  despliegue que lo motivó y acaba midiendo el servidor equivocado, en verde. Sin objetivo, fallar.
+- Cuando un perfil no puede tener cuentas sintéticas en absoluto, se excluye entero del repositorio
+  (`targets/movil/`). El `.local` es la alternativa que conserva el contrato versionado.
 - `make purge TARGET=<perfil>` borra los reportes de un perfil. Anonimiza antes de compartirlos.
 - `make down TARGET=<perfil>` destruye contenedores y volúmenes.
 
@@ -187,6 +262,6 @@ servicios sin endurecer: es un activo sensible, no una carpeta de trabajo.
 
 | Perfil | Stack | Estado |
 |---|---|---|
-| `costos_web` | Laravel + Vue + PostgreSQL | extraído del núcleo; verificado sin regresión |
+| `costos_web` | Laravel + Vue + PostgreSQL | peldaño 2 contra el despliegue de validación: matriz de 6 roles, flujos de negocio, recorrido de pantallas por rol y presupuesto del hilo principal. Credenciales en `target.env.local` |
 | `antiplagio` | Moodle + plugin PHP + FastAPI + Kafka + analyzers | estático y dinámico ejecutados; ver `reports/antiplagio/RUN.md` |
 | `_template` | — | esqueleto para el siguiente proyecto |

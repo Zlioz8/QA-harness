@@ -139,6 +139,10 @@ services:
     image: semgrep/semgrep:latest
     volumes:
       - ${SRC_PATH}:/src:ro
+      # Reglas propias del laboratorio (lib/semgrep/*.yml). Los paquetes publicos buscan
+      # vulnerabilidades clasicas; estas buscan modos de fallo del FRAMEWORK, que rompen el
+      # despliegue sin ser vulnerabilidades. Un target las activa desde SEMGREP_CONFIG.
+      - ./lib:/seclab-lib:ro
       - ./reports/${TARGET_NAME}/semgrep:/reports
     working_dir: /src
     # Explicit rulesets, never --config=auto: auto refuses to run with --metrics=off,
@@ -255,7 +259,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - ./targets/${TARGET_NAME}/target.env
+      - path: ./targets/${TARGET_NAME}/target.env
+        required: true
+      # Override local, no versionado: host real y credenciales. Ver .gitignore.
+      - path: ./targets/${TARGET_NAME}/target.env.local
+        required: false
     environment:
       BASE_URL: ${APP_INTERNAL_URL}
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
@@ -304,7 +312,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - ./targets/${TARGET_NAME}/target.env
+      - path: ./targets/${TARGET_NAME}/target.env
+        required: true
+      # Override local, no versionado: host real y credenciales. Ver .gitignore.
+      - path: ./targets/${TARGET_NAME}/target.env.local
+        required: false
     volumes:
       - ${SRC_PATH}:/src:ro
       - ./reports/${TARGET_NAME}/api:/reports
@@ -333,7 +345,11 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     env_file:
-      - ./targets/${TARGET_NAME}/target.env
+      - path: ./targets/${TARGET_NAME}/target.env
+        required: true
+      # Override local, no versionado: host real y credenciales. Ver .gitignore.
+      - path: ./targets/${TARGET_NAME}/target.env.local
+        required: false
     volumes:
       - ./targets/${TARGET_NAME}/jmeter:/plans:ro
       - ./reports/${TARGET_NAME}/jmeter:/reports
@@ -365,9 +381,14 @@ services:
     # (a second base URL, a shared secret, a component name) without the core having to learn
     # their names. The explicit block below is only the part of the contract the core relies on.
     env_file:
-      - ./targets/${TARGET_NAME}/target.env
+      - path: ./targets/${TARGET_NAME}/target.env
+        required: true
+      # Override local, no versionado: host real y credenciales. Ver .gitignore.
+      - path: ./targets/${TARGET_NAME}/target.env.local
+        required: false
     environment:
       BASE_URL: ${BASE_URL}
+      PERF_BUDGET_SKIP: ${PERF_BUDGET_SKIP:-}
       FRONTEND_URL: ${FRONTEND_URL:-}
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
       AUTH_ADAPTER: ${AUTH_ADAPTER:-none}

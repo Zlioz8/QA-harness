@@ -1,0 +1,75 @@
+[
+  {
+    "path": "/api/me",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ],
+    "note": "identidad propia: todo autenticado"
+  },
+  {
+    "path": "/api/catalogos",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ]
+  },
+  {
+    "path": "/api/usuarios?per_page=1",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ],
+    "note": "listado acotado por baseQuery segun el rol"
+  },
+  {
+    "path": "/api/usuarios/integrantes-grupo",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ]
+  },
+  {
+    "path": "/api/seguimiento-formularios?per_page=1",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ]
+  },
+  {
+    "path": "/api/grupos",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ]
+  },
+  {
+    "path": "/api/usuarios/exportar",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "exportacion masiva del padron: solo administracion"
+  },
+  {
+    "path": "/api/usuarios/plantilla",
+    "method": "GET",
+    "allow": [
+      "A"
+    ]
+  },
+  {
+    "path": "/api/inicioadmin",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "area administrativa"
+  }
+]

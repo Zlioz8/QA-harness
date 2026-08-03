@@ -14,9 +14,15 @@ TARGET ?=
 
 T        = targets/$(TARGET)
 ENVFILE  = $(T)/target.env
+# Override local, opcional y NUNCA versionado: valores que no pueden salir de esta máquina
+# (host del despliegue, credenciales de las cuentas de prueba). target.env es el contrato del
+# perfil y se versiona; target.env.local son los valores. compose aplica el último --env-file
+# que gana, así que este va después.
+ENVLOCAL = $(wildcard $(T)/target.env.local)
+ENVFILE_F= --env-file $(ENVFILE) $(if $(ENVLOCAL),--env-file $(ENVLOCAL),)
 RUNTIME  = $(wildcard $(T)/compose.runtime.yml)
 RUNTIME_F= $(if $(RUNTIME),-f $(RUNTIME),)
-DC       = docker compose --env-file $(ENVFILE) -f docker-compose.yml $(RUNTIME_F)
+DC       = docker compose $(ENVFILE_F) -f docker-compose.yml $(RUNTIME_F)
 REPORTS  = reports/$(TARGET)
 
 # Every goal except help/new/list needs a valid target profile.
@@ -30,7 +36,7 @@ guard:
 	@mkdir -p $(REPORTS) $(REPORTS)/trivy $(REPORTS)/semgrep $(REPORTS)/sbom $(REPORTS)/sonar \
 	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build
 
-.PHONY: help list new detect doctor guard require-live clone up down purge status gate dashboard run-manifest ui ui-stop ui-logs \
+.PHONY: budget help list new detect doctor guard require-live clone up down purge status gate dashboard run-manifest ui ui-stop ui-logs \
         sonar qodana semgrep secrets deps config-scan image-scan sbom static \
         build dast perf perf-jmeter e2e live all api-lint api-fuzz
 
@@ -162,6 +168,9 @@ api-fuzz: guard require-live   ##[live] Schemathesis: does the API obey its own 
 
 e2e: guard require-live        ##[live] Playwright functional / authz flows
 	$(DC) --profile e2e run --rm playwright
+
+budget: guard require-live     ##[live] presupuesto del hilo principal del navegador (R8 3.22)
+	$(DC) --profile e2e run --rm playwright sh -c "mkdir -p /run && cp -r /e2e/. /run/ && mkdir -p /run/lib && cp -r /seclab-lib/. /run/lib/ && cd /run && npm init -y >/dev/null 2>&1 && npm i -D @playwright/test@1.49.0 >/dev/null 2>&1 && npx playwright test lib/specs/main-thread-budget.spec.ts --reporter=line"
 
 live: dast perf e2e  ##[live] every dimension that needs the application answering
 

@@ -1,0 +1,81 @@
+# Reglas propias del laboratorio para pilas Laravel + Vue/Vite.
+#
+# Por qué existen: los paquetes públicos de semgrep (p/security-audit, p/owasp-top-ten) buscan
+# vulnerabilidades clásicas — inyección, XSS, criptografía. No conocen los modos de fallo del
+# FRAMEWORK, que son los que rompen un despliegue en producción sin ser vulnerabilidades. Las dos
+# reglas de aquí nacen de defectos reales encontrados a mano en Costos Web (informe R7 §3.14 y
+# §3.13) que ninguna herramienta del laboratorio detectaba, y que un `grep` bien puesto encuentra
+# en un segundo.
+#
+# Uso: SEMGREP_CONFIG en target.env incluye --config=/seclab-lib/semgrep/laravel-vue.yml
+rules:
+
+  # ---------------------------------------------------------------------------------------
+  # §3.14 — env() fuera de config/ es null en cuanto se cachea la configuración.
+  #
+  # Laravel NO carga el .env cuando existe bootstrap/cache/config.php
+  # (Illuminate/Foundation/Bootstrap/LoadEnvironmentVariables.php: `if ($app->configurationIsCached())
+  # return;`). Y `php artisan config:cache` es práctica obligada en producción. Resultado: cualquier
+  # env() fuera de los archivos de config devuelve null EN PRODUCCIÓN Y SOLO ALLÍ — funciona en el
+  # portátil del desarrollador, funciona en pruebas, y revienta al desplegar.
+  #
+  # En Costos Web dejó inutilizable el acceso con Microsoft: 500 en cada intento, con el .env
+  # correcto delante y sin ningún aviso al cachear.
+  - id: laravel-env-fuera-de-config
+    languages: [php]
+    severity: ERROR
+    message: >-
+      env() fuera de config/: devolverá null cuando la configuración esté cacheada
+      (php artisan config:cache), que es lo normal en producción. Declara el valor en un archivo de
+      config/ y léelo con config('...'), que sí se cachea resuelto.
+    metadata:
+      category: correctness
+      technology: [laravel]
+      confidence: HIGH
+      references:
+        - https://laravel.com/docs/configuration#configuration-caching
+    paths:
+      exclude:
+        - config/
+        - "*/config/"
+        - vendor/
+        - "*/vendor/"
+        - tests/
+        - "*/tests/"
+    patterns:
+      - pattern: env(...)
+
+  # ---------------------------------------------------------------------------------------
+  # §3.13 — rutas absolutas de desarrollo en plantillas Vue.
+  #
+  # Vite no procesa las rutas que empiezan por '/': las trata como de la carpeta public/ y las deja
+  # literales en el bundle. Con `npm run dev` funcionan, porque el servidor de Vite sirve la raíz
+  # del proyecto; en cualquier compilación de producción apuntan a un directorio que no existe.
+  #
+  # El síntoma es cruel: con el try_files de una SPA, nginx responde 200 con el index.html a cada
+  # imagen ausente. El navegador recibe HTML donde esperaba un SVG, pinta el icono roto, y en los
+  # registros del servidor no aparece ni un 404. En Costos Web eran 38 imágenes: toda la interfaz.
+  - id: vite-ruta-absoluta-a-src
+    languages: [generic]
+    severity: WARNING
+    message: >-
+      Ruta absoluta a /src/... en una plantilla: Vite no la procesa y en el bundle de producción
+      apunta a un directorio inexistente. Usa una ruta relativa ('../assets/x.svg') o
+      new URL('../assets/x.svg', import.meta.url) para que Vite la incorpore con su hash.
+    metadata:
+      category: correctness
+      technology: [vite, vue]
+      confidence: HIGH
+    paths:
+      include:
+        - "*.vue"
+        - "*.html"
+      exclude:
+        - node_modules/
+        - "*/node_modules/"
+        - dist/
+        - "*/dist/"
+    # El punto de entrada de Vite (index.html -> <script src="/src/main.js">) es la unica
+    # referencia absoluta a /src/ que es correcta y OBLIGATORIA: Vite la reescribe al compilar.
+    # Marcarla convertia la regla en ruido y tapaba los hallazgos reales, que son los assets.
+    pattern-regex: '(src|href)\s*=\s*"/src/(?!main\.[jt]s")[^"]+"'

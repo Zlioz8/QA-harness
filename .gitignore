@@ -27,6 +27,14 @@ node_modules/
 # Rule: a profile whose ROLE_A_/ROLE_B_ are real accounts stays out of the repository.
 targets/movil/
 
+# La otra mitad de esa misma regla. Un perfil no nace con cuentas reales: `costos_web` empezó
+# con localhost y cuentas sembradas, y se volvió peligroso el día que se le apuntó al despliegue
+# de validación. Excluir el perfil entero, como `movil`, cuesta el contrato versionado; el
+# override local lo conserva. target.env se versiona y declara QUÉ variables existen;
+# target.env.local trae los valores reales y no sale de esta máquina. La plantilla
+# target.env.local.example sí se versiona: es la que dice qué rellenar.
+targets/*/target.env.local
+
 # Editor settings — not part of the lab.
 .vscode/
 
