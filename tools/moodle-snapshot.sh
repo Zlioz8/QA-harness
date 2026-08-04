@@ -4,7 +4,7 @@
 # here — it is the condition under which the owner of a shared server agrees to this at all.
 #
 #   tools/moodle-snapshot.sh <ssh-target> <name> [db] [code-dir]
-#   tools/moodle-snapshot.sh zaju@10.217.78.166 moodle-zajuna-20260729
+#   tools/moodle-snapshot.sh usuario@<host-de-la-plataforma> moodle-zajuna-20260729
 #
 # Produces baselines/<name>/{moodle.dump,code.tar.zst,MANIFEST.md}, consumed by
 # recipes/moodle-baseline.yml.

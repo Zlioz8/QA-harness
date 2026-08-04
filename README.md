@@ -285,6 +285,33 @@ Detalle completo, con la evidencia de la corrida que lo demostró, en
 
 ---
 
+## Dos remotos, un `git push`
+
+Este laboratorio vive en dos sitios y **todo cambio debe llegar a los dos**:
+
+| Remoto | Para qué |
+|---|---|
+| `ssh://git@git.fsrisaralda.com:2222/fabrica_zajuna_otros/calidad_seguridad.git` | institucional; `main` está protegida, se entra por MR desde `dev` |
+| `git@github.com:Zlioz8/QA-harness.git` | espejo **público** |
+
+`origin` está configurado con dos URLs de push, así que un solo `git push` los actualiza ambos:
+
+```bash
+git push origin dev          # va a GitLab y a GitHub
+git remote -v                # 'origin' aparece con dos líneas (push)
+```
+
+Si clonas de nuevo, se reconstruye con:
+
+```bash
+git remote set-url --add --push origin git@github.com:Zlioz8/QA-harness.git
+git remote set-url --add --push origin ssh://git@git.fsrisaralda.com:2222/fabrica_zajuna_otros/calidad_seguridad.git
+```
+
+> **Uno de los dos espejos es público.** Antes de commitear, esa es la audiencia real de cualquier
+> dirección de infraestructura, credencial o volcado que entre al árbol — ver Política de datos.
+> Publicarlo lo escribe en un historial que no controlas.
+
 ## Política de datos
 
 El laboratorio puede llegar a concentrar datos personales reales, credenciales de prueba conocidas y

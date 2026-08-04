@@ -5,7 +5,7 @@
 #
 # La URL del blanco NO se incrusta: ${ZAP_TARGET_URL} la inyecta el core desde APP_INTERNAL_URL
 # del target (ver el servicio `zap` en docker-compose.yml). El mismo plan sirve para un despliegue
-# local o uno externo (p.ej. https://10.217.78.246) sin editarlo.
+# local o uno externo (p.ej. https://<host-de-validacion>) sin editarlo.
 env:
   contexts:
     - name: costos-api
