@@ -121,7 +121,7 @@ $EDITOR targets/proyecto_x/target.env
 | `SOURCE_DIRS` | qué subdirectorios son código propio | mantiene `vendor/` y `node_modules/` fuera de Sonar |
 | `LANGS` | `py,php,js,go` | decide qué linters aplican |
 
-> **Ojo con los comentarios en línea.** `QODANA_IMAGE=  # no aplica` es *vacío* para las
+> **Ojo con los comentarios en línea.** `QODANA_IMAGE=  # sin decidir` es *vacío* para las
 > herramientas del lab y un *nombre de imagen literal* para docker compose, que muere con
 > «invalid reference format». Los comentarios van en su propia línea, encima de la variable.
 > `make doctor` avisa de esto explícitamente.
@@ -132,8 +132,9 @@ $EDITOR targets/proyecto_x/target.env
 make detect TARGET=proyecto_x
 ```
 
-Hace un censo de archivos y **propone** (nunca escribe): `LANGS`, `AUTH_ADAPTER`, `QODANA_IMAGE` y
-qué recetas de `recipes/` aplicarían. También marca banderas rojas que ya son hallazgo: un compose
+Hace un censo de archivos y **propone** (nunca escribe): `LANGS`, `AUTH_ADAPTER` y qué recetas de
+`recipes/` aplicarían. `LANGS` importa más de lo que parece: de él sale el linter de Qodana al
+ejecutar, así que un `LANGS` vacío deja esa dimensión sin resolver. También marca banderas rojas que ya son hallazgo: un compose
 del proyecto publicando en `0.0.0.0`, un broker con login anónimo. Confirma tú y pega lo que
 corresponda: adivinar en silencio es como una auditoría acaba midiendo otra cosa.
 

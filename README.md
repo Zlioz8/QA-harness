@@ -94,7 +94,7 @@ Si tu código vive fuera del directorio padre del laboratorio, indícalo:
 ```bash
 make new    TARGET=proyecto_x            # esqueleto desde targets/_template
 $EDITOR targets/proyecto_x/target.env    # SRC_PATH (o REPO_URL+BRANCH)
-make detect TARGET=proyecto_x            # propone LANGS, QODANA_IMAGE, AUTH_ADAPTER y recetas
+make detect TARGET=proyecto_x            # propone LANGS, AUTH_ADAPTER y recetas
 make doctor TARGET=proyecto_x            # preflight: docker, disco, puertos, permisos, roles
 make static TARGET=proyecto_x            # YA produce hallazgos, sin levantar nada
 ```
@@ -121,9 +121,9 @@ $EDITOR targets/proyecto_x/target.env.local     # aquí sí, valores reales
 
 El `.local` se carga **encima** del contrato y gana clave a clave: el `Makefile` pasa los dos
 `--env-file` a compose, cada servicio lo declara como `env_file` opcional, y `tools/lib-env.sh` lo
-consulta primero. Una clave vacía en el `.local` **no** anula: `QODANA_IMAGE=` en el contrato
-significa «no aplica, salto documentado», y un `.local` a medio rellenar no debe convertir eso en
-otra cosa. Para tapar una clave se le da valor; para heredarla, se omite.
+consulta primero. Una clave vacía en el `.local` **no** anula: `BASE_URL=` en el contrato significa
+«este perfil aún no apunta a ningún despliegue», y un `.local` a medio rellenar no debe convertir
+eso en otra cosa. Para tapar una clave se le da valor; para heredarla, se omite.
 
 Un perfil no nace con credenciales reales — se vuelve peligroso el día que deja de apuntar a
 `localhost` con cuentas sembradas y se le apunta a un despliegue de validación. Ese es el momento
