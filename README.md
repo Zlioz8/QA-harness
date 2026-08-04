@@ -6,6 +6,10 @@ orquestación es `docker compose` declarativo y un `Makefile` de objetivos 1:1.
 > **Principio.** El proyecto auditado **nunca se modifica**: se monta *read-only*. Lo único
 > escribible es `reports/` y las bases de datos efímeras. El laboratorio **observa**, no corrige.
 
+> **¿Vienes a *usar* la herramienta, no a entenderla?** El paso a paso operativo del analista de QA
+> —alta del proyecto, credenciales, matriz de autorización, corrida, veredicto, triaje y entrega—
+> está en [`MANUAL_USO_QA.md`](MANUAL_USO_QA.md). Este README explica el diseño y el porqué.
+
 **Requisito único en la máquina destino:** Docker + Docker Compose v2.
 **Requisito de capacidad:** sistema de archivos **por debajo del 90% de uso** (SonarQube falla en
 silencio por encima) y ~8 GB para imágenes de herramientas. `make doctor` lo comprueba.
@@ -18,15 +22,24 @@ silencio por encima) y ~8 GB para imágenes de herramientas. `make doctor` lo co
 SECURITY-LAB/
   docker-compose.yml     núcleo: SÓLO herramientas. Ningún nombre de proyecto aparece aquí.
   Makefile               objetivos; TARGET=<perfil> elige el proyecto
-  tools/                 new · detect · doctor · gate · run-manifest · status
-  recipes/               bloques de arranque reutilizables (postgres, moodle-plugin, fastapi-uvicorn, kafka-zk)
-  lib/auth/              adaptadores de autenticación (sanctum, moodle-session, jwt-bearer, basic, none)
+  tools/                 new · detect · doctor · tier · require-live · secrets · gate ·
+                         run-manifest · status · dashboard · triage · conversores a SARIF
+  ui/                    la interfaz web local (make ui) — FastAPI, un solo operador
+  recipes/               bloques de arranque reutilizables (postgres, moodle-plugin,
+                         moodle-baseline, fastapi-uvicorn, kafka-zk)
+  lib/auth/              adaptadores de autenticación (sanctum, moodle-session, jwt-bearer,
+                         basic, zajuna, none)
   lib/specs/             pruebas genéricas que hereda todo proyecto (cabeceras, matriz de autorización,
                          presupuesto del hilo principal)
   lib/semgrep/           reglas SAST propias del laboratorio, por pila (laravel-vue.yml)
+  lib/k6/                sesión compartida para los scripts de carga
+  configs/               config de herramienta común a todos los perfiles (trivy.yaml)
+  scenarios/             fixtures SQL de escenario sembrado
+  baselines/             instantáneas de plataforma (código + dump); solo el MANIFEST se versiona
   targets/<nombre>/      el perfil de un proyecto: target.env, target.env.local, compose.runtime.yml,
-                         zap/, k6/, playwright/, db-init/
-  reports/<nombre>/      salidas + RUN.md (qué se ejecutó y qué NO)
+                         zap/, k6/, playwright/, jmeter/, db-init/
+  work/                  clones hechos por `make clone`                        [no versionado]
+  reports/<nombre>/      salidas + RUN.md (qué se ejecutó y qué NO)            [no versionado]
 ```
 
 La línea de corte: el núcleo hace lo que se puede saber **leyendo un repositorio**; el perfil aporta
@@ -165,12 +178,20 @@ Tres decisiones deliberadas de esa página:
 | Inventario de componentes | Syft | `make sbom` | no |
 | SAST poliglota con taint | semgrep | `make semgrep` | no |
 | Calidad / mantenibilidad | SonarQube + Qodana | `make sonar` / `make qodana` | no |
+| Contrato de API (la descripción OpenAPI) | Spectral | `make api-lint` | no |
+| Build de producción del proyecto | el del propio perfil | `make build` | no |
 | Superficie runtime | OWASP ZAP | `make dast` | **sí** |
 | Autorización y flujos | Playwright | `make e2e` | **sí** |
 | Carga | k6 | `make perf` | **sí** |
+| Carga con un plan .jmx propio | JMeter | `make perf-jmeter` | **sí** |
+| La API contra su propio contrato | Schemathesis | `make api-fuzz` | **sí** |
 | Presupuesto del hilo principal | Playwright + CDP | `make budget` | **sí** |
 
-`make static` corre todo lo `[code]`; `make live`, todo lo `[live]`.
+`make static` = `secrets deps config-scan sbom semgrep qodana sonar`, y `make live` = `dast perf
+e2e`: los dos agregados cubren lo habitual, no *todo* lo etiquetado. Las dimensiones que dependen
+de un artefacto del perfil —`api-lint`, `api-fuzz`, `build`, `perf-jmeter`, `budget`, `image-scan`—
+se invocan aparte, a propósito: incluirlas en el agregado haría que un perfil sin plan `.jmx` o sin
+OpenAPI arrastrara un `NO DISPONIBLE` en cada corrida. `make all` = `static live`.
 
 ### Reglas SAST propias (`lib/semgrep/`)
 
@@ -264,4 +285,8 @@ servicios sin endurecer: es un activo sensible, no una carpeta de trabajo.
 |---|---|---|
 | `costos_web` | Laravel + Vue + PostgreSQL | peldaño 2 contra el despliegue de validación: matriz de 6 roles, flujos de negocio, recorrido de pantallas por rol y presupuesto del hilo principal. Credenciales en `target.env.local` |
 | `antiplagio` | Moodle + plugin PHP + FastAPI + Kafka + analyzers | estático y dinámico ejecutados; ver `reports/antiplagio/RUN.md` |
+| `anuncios_de_plataforma` | Plugin Moodle sobre la línea base de plataforma (`baselines/`) | peldaño 3: el laboratorio levanta el Moodle real; estático + ZAP + k6 + JMeter ejecutados |
 | `_template` | — | esqueleto para el siguiente proyecto |
+
+`targets/movil/` existe en esta máquina y **no está en el repositorio**: sus cuentas son reales, no
+sembradas (ver Política de datos). Que no aparezca en `make list` de un clon nuevo es lo correcto.

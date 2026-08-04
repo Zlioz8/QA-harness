@@ -21,6 +21,7 @@ once, by the first project on that stack.
 |---|---|---|
 | `postgres.yml` | PostgreSQL + `db-init/*.sql` on first boot | `DB_IMAGE DB_NAME DB_USER DB_PASSWORD TARGET_NAME` |
 | `moodle-plugin.yml` | A Moodle serving a plugin that has no entry point of its own | `MOODLE_IMAGE MOODLE_PORT PLUGIN_SUBDIR PLUGIN_COMPONENT PLUGIN_TYPE ROLE_A_* DB_*` |
+| `moodle-baseline.yml` | The platform's **own** Moodle, restored ephemeral from `baselines/<name>/` and neutralised before the port opens. Use it instead of `moodle-plugin.yml` when the platform version is what you are auditing against | `MOODLE_BASELINE MOODLE_PORT MOODLE_WWWROOT MOODLE_ADMIN_* DB_*` |
 | `fastapi-uvicorn.yml` | A FastAPI/uvicorn service from a source subdir | `API_SUBDIR API_MODULE API_PORT PYTHON_IMAGE` |
 | `kafka-zk.yml` | Kafka + Zookeeper for pipelines that need a broker | `KAFKA_IMAGE ZK_IMAGE` |
 
