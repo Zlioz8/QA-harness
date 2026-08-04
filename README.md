@@ -308,10 +308,12 @@ git remote set-url --add --push origin https://github.com/Zlioz8/QA-harness.git
 git remote set-url --add --push origin ssh://git@git.fsrisaralda.com:2222/fabrica_zajuna_otros/calidad_seguridad.git
 ```
 
-GitHub va por **HTTPS**, no por SSH, y no es un descuido: la llave SSH de este equipo se
-identifica ante GitHub como otra cuenta sin permiso de escritura (`Permission to
-Zlioz8/QA-harness.git denied to ikisanti`). El push HTTPS usa el credential helper `store`.
-GitLab sí va por SSH, con la llave de siempre.
+GitHub va por **HTTPS** y GitLab por SSH. No es un descuido: el push a GitHub se autentica con el
+credential helper (`gh auth git-credential`), que sí sabe qué cuenta eres. Por SSH dependerías de
+qué llave ofrezca el agente — y ese camino ya falló una vez, autenticando contra la cuenta
+equivocada. Si prefieres SSH para GitHub, registra la pública del equipo en tu cuenta y declara la
+identidad explícitamente en `~/.ssh/config` (`Host github.com` + `IdentityFile` + `IdentitiesOnly
+yes`); no lo dejes a la llave por defecto.
 
 > **Uno de los dos espejos es público.** Antes de commitear, esa es la audiencia real de cualquier
 > dirección de infraestructura, credencial o volcado que entre al árbol — ver Política de datos.
