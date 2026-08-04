@@ -44,7 +44,9 @@ branch=$(git -C "${SRC_PATH:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo
   chk "SBOM"                  "sbom/sbom.spdx.json"
   chk "SAST (semgrep)"        "semgrep/semgrep.sarif"
   chk "Quality (SonarQube)"   "sonar/sonar.sarif"
-  chk "Quality (qodana)"      "qodana/report/index.html"
+  # El artefacto que cuenta es el SARIF, no el HTML: es el que leen el gate y el informe. Una
+  # corrida que dejó report/index.html pero no SARIF es una dimensión que se perdió por el camino.
+  chk "Quality (qodana)"      "qodana/qodana.sarif"
   chk "API contract (Spectral)" "api/spectral.sarif"
   chk "API fuzz (Schemathesis)" "api/schemathesis.xml"
   chk "DAST (ZAP)"            "zap/zap-report.html"

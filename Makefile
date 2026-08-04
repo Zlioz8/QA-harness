@@ -90,25 +90,44 @@ semgrep: guard    ##[code] polyglot SAST with taint tracking
 	$(DC) --profile static run --rm semgrep
 
 sonar: guard      ##[code] SonarQube server + scanner
+	@# Sonar es la única herramienta del lab que necesita un SERVIDOR, y cada perfil levanta el
+	@# suyo en el mismo puerto: auditar un segundo proyecto sin apagar el primero moría con
+	@# "port is already allocated", un error que no nombra al culpable. Ver el script.
+	@tools/sonar-free-port.sh "$(TARGET)"
 	$(DC) --profile static up -d sonarqube
-	$(DC) --profile static run --rm sonar-scanner
+	@# Un servidor recién arrancado no trae token, y el scanner sin token responde 401 —dimensión
+	@# que "corrió" sin dejar análisis. tools/sonar-token.sh acuña uno con las credenciales admin
+	@# (genérico, idempotente); si el target ya declara SONAR_TOKEN, lo respeta. El -e lo inyecta
+	@# en el scanner y el export sin que tenga que vivir en target.env.
+	@tok=$$(tools/sonar-token.sh "$(TARGET)"); \
+	test -n "$$tok" || { echo "sonar: sin token, no se ejecuta el scanner"; exit 1; }; \
+	$(DC) --profile static run --rm -e SONAR_TOKEN="$$tok" sonar-scanner; \
+	$(DC) --profile static run --rm -e SONAR_TOKEN="$$tok" sonar-export
 	@# Without this the analysis exists only inside the server: absent from the gate, from
 	@# RUN.md and from the report. A dimension that ran and left no artifact is indistinguishable
 	@# from one that never ran, which is the failure this lab keeps insisting must not happen.
-	$(DC) --profile static run --rm sonar-export
 	@tools/sonar-sarif.py $(REPORTS)/sonar
 
-qodana: guard     ##[code] JetBrains Qodana (image chosen by QODANA_IMAGE in target.env)
-	@# `QODANA_IMAGE=` empty means "this project has no Qodana linter", which the template has
-	@# always said. It was never implemented: compose received an empty image name and `static`
-	@# died here, before sonar. Not every language has a Qodana image (PHP has no community one),
-	@# so this is a normal state, not an error — but it is a SKIP, and a skip is not a pass:
-	@# run-manifest and the report keep reading the absent artifact as NOT RUN.
-	@if [ -z "$$(sed -n 's/^QODANA_IMAGE=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')" ]; then \
-	  echo "qodana: QODANA_IMAGE is empty — skipped (declared as not applicable for this target)"; \
+qodana: guard     ##[code] JetBrains Qodana (linter resuelto desde LANGS; QODANA_IMAGE lo fija a mano)
+	@# Antes: `QODANA_IMAGE=` vacío = salto declarado. Los CUATRO perfiles versionados lo tenían
+	@# vacío y la dimensión no corrió jamás en ningún proyecto (reports/*/qodana/report/ vacío).
+	@# Un campo obligatorio, a mano, con el nombre exacto de una imagen que además depende de la
+	@# licencia, no se rellena nunca. Ahora lo resuelve tools/qodana-image.sh desde LANGS, y el
+	@# perfil solo interviene para fijar una imagen concreta o para desactivarlo (QODANA_IMAGE=none).
+	@img=$$(tools/qodana-image.sh "$(TARGET)"); \
+	if [ -z "$$img" ]; then \
+	  echo "qodana: NO DISPONIBLE para este perfil (razón arriba). No es un PASS: run-manifest"; \
+	  echo "        y el informe siguen leyendo el artefacto ausente como NO EJECUTADO."; \
 	else \
-	  $(DC) --profile static run --rm qodana; \
+	  QODANA_IMAGE="$$img" $(DC) --profile static run --rm qodana || true; \
 	fi
+	@# Mismo criterio que ZAP: Qodana sale != 0 cuando ENCUENTRA cosas (su umbral de fallo), y una
+	@# herramienta informa, no juzga —el veredicto es de `make gate`—. Pero "ignora el código de
+	@# salida" no puede tapar una herramienta que no corrió, así que el criterio de éxito es el
+	@# artefacto. Y sin esta conversión no había artefacto que el gate supiera leer: Qodana dejaba
+	@# su HTML y su propio SARIF, el gate no miraba ninguno, y 134 hallazgos medidos sobre
+	@# antiplagio no aparecían en el veredicto ni en el informe.
+	@tools/qodana-sarif.py $(REPORTS)/qodana || true
 
 static: secrets deps config-scan sbom semgrep qodana sonar  ##[code] every static tool
 
@@ -117,7 +136,16 @@ up: guard         ##[live] start the target's runtime
 	$(DC) --profile runtime up -d --build
 
 build: guard      ##[code] the target's production build, if it has one
-	$(DC) --profile build run --rm front-build
+	@# El servicio de build (por defecto `front-build`) vive en el compose.runtime.yml del target,
+	@# porque CÓMO se compila es conocimiento del proyecto. Un perfil de peldaño 2 (apunta a un
+	@# despliegue externo) no trae overlay: el build NO APLICA, no es un error —mismo criterio que
+	@# api-lint/qodana. Sin esto `make all` moría con "no such service: front-build".
+	@svc=$${BUILD_SERVICE:-front-build}; \
+	if [ -z "$(RUNTIME)" ] || ! $(DC) config --services 2>/dev/null | grep -qx "$$svc"; then \
+	  echo "build: no existe el servicio '$$svc' en un compose.runtime.yml del target — NOT AVAILABLE para este perfil."; \
+	else \
+	  $(DC) --profile build run --rm "$$svc"; \
+	fi
 
 dast: guard require-live       ##[live] OWASP ZAP against the running app
 	@# ZAP exits non-zero on plan WARNINGS (an unreachable seed URL, say), which would abort the

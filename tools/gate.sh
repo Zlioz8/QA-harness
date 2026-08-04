@@ -55,13 +55,27 @@ if [ "$n" -lt 0 ]; then skip "semgrep not run"
 elif [ "$n" -le "${MAX_SAST_FINDINGS:-999}" ]; then pass "SAST findings: $n (max ${MAX_SAST_FINDINGS:-999})"
 else fail "SAST findings: $n (max ${MAX_SAST_FINDINGS:-999})"; fi
 
-# Sonar counts against the SAST budget on purpose: it is the same question (defects in the code
-# this team wrote) asked by a second engine, and two separate budgets would let a project pass
-# by splitting its findings across them.
-n=$(sarif_count "$R/sonar/sonar.sarif")
-if [ "$n" -lt 0 ]; then skip "sonar not run"
-elif [ "$n" -le "${MAX_QUALITY_FINDINGS:-500}" ]; then pass "quality findings: $n (max ${MAX_QUALITY_FINDINGS:-500})"
-else fail "quality findings: $n (max ${MAX_QUALITY_FINDINGS:-500})"; fi
+# Calidad = SonarQube + Qodana, SUMADOS contra un solo presupuesto. Son dos motores haciendo la
+# misma pregunta (defectos en el código que escribió este equipo), y dos presupuestos separados
+# dejarían pasar un proyecto repartiendo sus hallazgos entre ambos. Se informa el desglose para
+# que un número alto se pueda atribuir, pero el umbral es uno.
+#
+# Cada motor conserva su propio -1: "sonar corrió y qodana no" no puede leerse como si la mitad
+# ausente valiera cero. Si NINGUNO corrió, la dimensión entera es skip.
+nsonar=$(sarif_count "$R/sonar/sonar.sarif")
+nqodana=$(sarif_count "$R/qodana/qodana.sarif")
+if [ "$nsonar" -lt 0 ] && [ "$nqodana" -lt 0 ]; then
+  skip "quality not run (neither SonarQube nor Qodana)"
+else
+  n=0; detail=""
+  if [ "$nsonar" -ge 0 ]; then n=$((n + nsonar)); detail="sonar=$nsonar"; else detail="sonar=NOT RUN"; fi
+  if [ "$nqodana" -ge 0 ]; then n=$((n + nqodana)); detail="$detail qodana=$nqodana"; else detail="$detail qodana=NOT RUN"; fi
+  if [ "$n" -le "${MAX_QUALITY_FINDINGS:-500}" ]; then
+    pass "quality findings: $n (max ${MAX_QUALITY_FINDINGS:-500}) [$detail]"
+  else
+    fail "quality findings: $n (max ${MAX_QUALITY_FINDINGS:-500}) [$detail]"
+  fi
+fi
 
 n=$(sarif_count "$R/zap/zap.sarif")
 if [ "$n" -lt 0 ]; then skip "ZAP not run"

@@ -34,6 +34,7 @@ SOURCES = [
     ("trivy-image",  "CVE de imágenes",                 "trivy/trivy-image.sarif"),
     ("semgrep",      "SAST",                            "semgrep/semgrep.sarif"),
     ("sonar",        "Calidad (SonarQube)",             "sonar/sonar.sarif"),
+    ("qodana",       "Calidad (Qodana)",                "qodana/qodana.sarif"),
     ("api-lint",     "Contrato de API (Spectral)",      "api/spectral.sarif"),
     ("zap",          "Superficie runtime (DAST)",       "zap/zap.sarif"),
 ]

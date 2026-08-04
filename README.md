@@ -203,6 +203,29 @@ cuanto corre `php artisan config:cache` — es decir, solo en producción; y las
 `assets` que sobreviven al `build` de Vite). Un perfil las activa añadiendo
 `--config=/seclab-lib/semgrep/laravel-vue.yml` a su `SEMGREP_CONFIG`.
 
+### Calidad: dos motores, un presupuesto (`make sonar` · `make qodana`)
+
+SonarQube y Qodana hacen la misma pregunta —defectos en el código que escribió este equipo— con
+motores distintos, así que sus hallazgos **se suman** contra un solo `MAX_QUALITY_FINDINGS`. Dos
+presupuestos separados dejarían pasar un proyecto repartiendo sus hallazgos entre ambos. El gate
+imprime el desglose (`[sonar=500 qodana=134]`) para que un número alto se pueda atribuir.
+
+Ninguno de los dos exige que el perfil sepa nada de la herramienta:
+
+- **Sonar** acuña su propio token contra un servidor recién arrancado (`tools/sonar-token.sh`) y,
+  como es la única herramienta del laboratorio que necesita un servidor, libera el puerto cuando
+  lo ocupa el SonarQube de otro perfil (`tools/sonar-free-port.sh`) en vez de morir con un
+  «port is already allocated» que no nombra al culpable.
+- **Qodana** resuelve su linter desde `LANGS` (`tools/qodana-image.sh`). Esto era un hueco real y
+  medido: `QODANA_IMAGE` nacía vacío, vacío significaba «salto declarado», y los cuatro perfiles
+  versionados lo tenían vacío — la dimensión **no había corrido jamás en ningún proyecto**.
+
+El límite de Qodana es de licencia, no del laboratorio: JetBrains solo publica imágenes
+`-community` (sin token) para python, jvm y android. Para PHP, JS, Go o .NET el único linter es de
+pago y exige `QODANA_TOKEN`. Sin él la dimensión se reporta **`NO DISPONIBLE`, con la razón** —
+nunca como aprobada— y la calidad de ese proyecto la cubren SonarQube y semgrep, que sí son
+agnósticos.
+
 ### Presupuesto del hilo principal (`make budget`)
 
 La dimensión que faltaba: **el navegador**. k6 mide el servidor, ZAP mide cabeceras, la matriz mide

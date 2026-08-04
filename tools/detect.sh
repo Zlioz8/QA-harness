@@ -87,11 +87,14 @@ echo
 echo "-- proposed target.env values (review, then paste) --"
 echo "LANGS=$(uniq_join "${LANGS[@]:-}")"
 echo "AUTH_ADAPTER=$ADAPTER"
-case " ${LANGS[*]} " in
-  *" py "*)  echo "QODANA_IMAGE=jetbrains/qodana-python:latest";;
-  *" php "*) echo "QODANA_IMAGE=jetbrains/qodana-php:latest";;
-  *)         echo "QODANA_IMAGE=   # no Qodana linter for these languages; semgrep still applies";;
-esac
+# QODANA_IMAGE ya NO se propone aquí: se resuelve desde LANGS en tools/qodana-image.sh, en el
+# momento de correr. Proponer un nombre a mano fue el origen del hueco — las imágenes que este
+# script sugería (qodana-python, qodana-php) son las de pago, que se niegan a arrancar sin
+# QODANA_TOKEN, así que el campo se quedaba vacío y la dimensión no corría en ningún proyecto.
+echo "QODANA_IMAGE=            # déjalo vacío: el linter se resuelve desde LANGS al ejecutar."
+echo "#   'make qodana TARGET=$TARGET' dirá qué imagen le toca y, si no le toca ninguna"
+echo "#   gratuita para estos lenguajes, lo dirá como NO DISPONIBLE con su razón."
+echo "#   QODANA_IMAGE=<imagen> fija una a mano; QODANA_IMAGE=none desactiva la dimensión."
 echo "# recipes to compose in compose.runtime.yml: $(uniq_join "${RECIPES[@]:-none}")"
 if [ "${#LANGS[@]}" -gt 1 ]; then
   echo "# NOTE: polyglot project. One Qodana image covers ONE language; the others are"

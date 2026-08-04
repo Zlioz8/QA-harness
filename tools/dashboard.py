@@ -287,6 +287,11 @@ def build(target, root):
         # Exported from the server by `make sonar`; before that it analysed and left nothing behind.
         ("Calidad (SonarQube)", "SonarQube", load_sarif(f"{rep}/sonar/sonar.sarif", "sonar"),
          "sonar/sonar.sarif"),
+        # Qodana es una dimensión con hallazgos, no un enlace a un HTML. Mientras se pintó como
+        # "sí / NO EJECUTADO" con un guion en la columna de cuenta, una corrida con cientos de
+        # inspecciones se leía igual que una limpia. tools/qodana-sarif.py produce este archivo.
+        ("Calidad (Qodana)", "Qodana", load_sarif(f"{rep}/qodana/qodana.sarif", "qodana"),
+         "qodana/qodana.sarif"),
         ("Contrato de API (OpenAPI)", "Spectral", load_sarif(f"{rep}/api/spectral.sarif", "api-lint"),
          "api/spectral.sarif"),
         ("Superficie runtime (DAST)", "OWASP ZAP", load_sarif(f"{rep}/zap/zap.sarif", "zap"),
@@ -295,7 +300,6 @@ def build(target, root):
     pw = load_playwright(f"{rep}/playwright/results.json")
     k6 = load_k6(f"{rep}/k6/summary.json")
     sbom = os.path.exists(f"{rep}/sbom/sbom.spdx.json")
-    qodana = os.path.exists(f"{rep}/qodana/report/index.html")
 
     # ---- header
     commit = "—"
@@ -370,9 +374,6 @@ def build(target, root):
     parts.append(f'<tr><td>Inventario (SBOM)</td><td>Syft</td><td class="num">—</td><td></td>'
                  f'<td class="{"ran-yes" if sbom else "ran-no"}">'
                  f'{"sí" if sbom else "NO EJECUTADO"}</td></tr>')
-    parts.append(f'<tr><td>Calidad</td><td>Qodana</td><td class="num">—</td><td></td>'
-                 f'<td class="{"ran-yes" if qodana else "ran-no"}">'
-                 f'{"sí" if qodana else "NO EJECUTADO"}</td></tr>')
     parts.append("</table>")
 
     # ---- detail per dimension

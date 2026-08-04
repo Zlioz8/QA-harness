@@ -324,7 +324,7 @@ make image-scan  TARGET=proyecto_x IMAGE=mi-repo:tag
 | `sbom` | Syft | inventario de componentes y licencias | `sbom/sbom.spdx.json` |
 | `semgrep` | semgrep | SAST poliglota con taint | `semgrep/semgrep.sarif` |
 | `sonar` | SonarQube | calidad y mantenibilidad | `sonar/sonar.sarif`, `sonar/issues.json` |
-| `qodana` | JetBrains Qodana | calidad, un lenguaje por imagen | `qodana/report/index.html` |
+| `qodana` | JetBrains Qodana | calidad, un lenguaje por imagen | `qodana/qodana.sarif`, `qodana/report/` |
 | `api-lint` | Spectral | ¿la descripción OpenAPI es sólida? | `api/spectral.sarif` |
 | `dast` | OWASP ZAP | superficie runtime, cabeceras, alertas | `zap/zap-report.html`, `zap/zap.sarif` |
 | `e2e` | Playwright | autorización y flujos funcionales | `playwright/results.json`, `playwright/html/` |
@@ -365,7 +365,7 @@ lo que le da significado, contra los umbrales declarados en `target.env`:
 | `ALLOW_SECRETS` | secretos admitidos en la historia git (normalmente `0`) |
 | `MAX_DEP_FINDINGS` | hallazgos de dependencias |
 | `MAX_SAST_FINDINGS` | hallazgos de semgrep |
-| `MAX_QUALITY_FINDINGS` | hallazgos de SonarQube |
+| `MAX_QUALITY_FINDINGS` | hallazgos de calidad: SonarQube **+** Qodana sumados |
 | `MAX_DAST_FINDINGS` | alertas de ZAP |
 | `K6_P95_MS` / `K6_ERR_RATE` | SLO de latencia p95 y tasa de error |
 
@@ -467,7 +467,8 @@ de trabajo.
 | `ABORTED: <url> -> 000` en un objetivo `[live]` | la app no está arriba, **o** las herramientas no la alcanzan desde su red: usa `APP_INTERNAL_URL=http://host.docker.internal:<puerto>` |
 | `ABORTED: ... -> 302/401` | `HEALTH_PATH` apunta a una redirección o a un login, no a un health check |
 | SonarQube muere con `408` | disco por encima del 90 % de uso: libera espacio, no añadas GB |
-| `qodana: QODANA_IMAGE is empty — skipped` | normal: no todo lenguaje tiene imagen Qodana (PHP no tiene community). Es un **skip**, y un skip no es un pass |
+| `qodana: NO DISPONIBLE para este perfil` | el linter se resuelve desde `LANGS`. Si tu lenguaje solo tiene imagen de pago (PHP, JS, Go, .NET), hace falta `QODANA_TOKEN`; sin él la dimensión es **NO DISPONIBLE**, nunca un pass. La calidad la cubren `sonar` y `semgrep` |
+| `qodana: LANGS vacío` | corre `make detect` y copia el `LANGS` que propone |
 | `invalid reference format` al arrancar compose | comentario en línea en `target.env`: muévelo a su propia línea |
 | ZAP no genera reporte | permisos de `reports/<perfil>/zap` (ZAP corre sin privilegios); el `guard` del Makefile pre-crea los directorios como usuario del host |
 | k6 marca 100 % de error contra un https sano | certificado autofirmado: `K6_INSECURE_SKIP_TLS_VERIFY=true` |
