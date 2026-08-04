@@ -237,6 +237,17 @@ services:
     # with this mapping. Playwright does not need it: it runs with network_mode: host.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # El plan (automation.yaml) es conocimiento del proyecto, pero la URL del blanco NO debe estar
+    # incrustada: en peldaño 2 apunta a un despliegue externo (APP_INTERNAL_URL), no a un servicio
+    # `app` del compose. Sin esto ZAP resolvía `http://app:8000` y moría con "name resolution".
+    # ZAP Automation Framework sustituye ${ZAP_TARGET_URL} desde el entorno del contenedor.
+    env_file:
+      - path: ./targets/${TARGET_NAME}/target.env
+        required: true
+      - path: ./targets/${TARGET_NAME}/target.env.local
+        required: false
+    environment:
+      ZAP_TARGET_URL: ${APP_INTERNAL_URL:-}
     volumes:
       - ./targets/${TARGET_NAME}/zap:/zap/wrk/zap:ro
       - ./reports/${TARGET_NAME}/zap:/zap/wrk/reports
@@ -271,6 +282,11 @@ services:
       ROLE_A_PASS: ${ROLE_A_PASS:-}
       ROLE_B_USER: ${ROLE_B_USER:-}
       ROLE_B_PASS: ${ROLE_B_PASS:-}
+      # Despliegues de validación con certificado autofirmado (peldaño 2, host interno) hacen que
+      # k6 aborte TODAS las peticiones con "x509: certificate signed by unknown authority" —el run
+      # marca 100% de error y se confunde con un fallo de la app. Playwright lo tolera solo; k6 no.
+      # Campo que llena el target: K6_INSECURE_SKIP_TLS_VERIFY=true cuando el host es autofirmado.
+      K6_INSECURE_SKIP_TLS_VERIFY: ${K6_INSECURE_SKIP_TLS_VERIFY:-false}
     volumes:
       - ./targets/${TARGET_NAME}/k6:/scripts:ro
       # NEVER mount at /lib: that is the container's own library directory. Shadowing it removes
@@ -278,7 +294,10 @@ services:
       # names the shell, not the mount that broke it.
       - ./lib/k6:/seclab-lib:ro
       - ./reports/${TARGET_NAME}/k6:/reports
-    command: ["run", "--summary-export=/reports/summary.json", "/scripts/smoke.js"]
+    # El script de carga lo elige el target (K6_SCRIPT). `smoke.js` es el defecto portable: un
+    # humo de un VU. La prueba real de saturación es otra (p.ej. usuarios_load.js) y se declara
+    # en target.env sin tocar el core.
+    command: ["run", "--summary-export=/reports/summary.json", "/scripts/${K6_SCRIPT:-smoke.js}"]
 
   # ---------- API contract (OpenAPI / Swagger) ----------
   # The gap these two fill: every other tool here treats an HTTP API as a set of URLs to be

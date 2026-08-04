@@ -52,6 +52,18 @@ def main() -> int:
         print(f"zap: no report to convert ({exc})", file=sys.stderr)
         return 1
 
+    # El plan puede emitir YA SARIF en zap-report.json (report job con template sarif-json).
+    # Entonces no hay clave "site" que recorrer y esta conversion escribia un zap.sarif con
+    # results: [] — gate.sh contaba 0 alertas sobre un informe con decenas y estampaba PASS.
+    # Es el mismo modo de fallo que motivo este script, en espejo. Si ya es SARIF, se copia.
+    if "runs" in doc and "site" not in doc:
+        out = os.path.join(d, "zap.sarif")
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=1, ensure_ascii=False)
+        n = sum(len(r.get("results", [])) for r in doc.get("runs", []))
+        print(f"zap: report already SARIF, copied as-is ({n} findings) -> {out}")
+        return 0
+
     results, rules = [], {}
     for site in doc.get("site", []):
         for alert in site.get("alerts", []):

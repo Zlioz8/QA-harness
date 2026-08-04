@@ -2,14 +2,18 @@
 # Scope: the running backend API. Unauthenticated surface here (CORS, security
 # headers, info leakage, public endpoints). Authenticated authorization is covered
 # by the Playwright flows, which drive the real session-cookie login.
+#
+# La URL del blanco NO se incrusta: ${ZAP_TARGET_URL} la inyecta el core desde APP_INTERNAL_URL
+# del target (ver el servicio `zap` en docker-compose.yml). El mismo plan sirve para un despliegue
+# local o uno externo (p.ej. https://10.217.78.246) sin editarlo.
 env:
   contexts:
     - name: costos-api
       urls:
-        - "http://app:8000"
+        - "${ZAP_TARGET_URL}"
       includePaths:
-        - "http://app:8000/api.*"
-        - "http://app:8000/sanctum.*"
+        - "${ZAP_TARGET_URL}/api.*"
+        - "${ZAP_TARGET_URL}/sanctum.*"
       excludePaths:
         - ".*/logout"
   parameters:
@@ -20,7 +24,7 @@ jobs:
   - type: spider
     parameters:
       context: costos-api
-      url: "http://app:8000/api"
+      url: "${ZAP_TARGET_URL}/api"
       maxDuration: 3
 
   - type: passiveScan-wait

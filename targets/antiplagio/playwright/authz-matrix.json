@@ -1,62 +1,68 @@
 [
   {
-    "path": "/local/antiplagiarsena/get_student_doc.php?userid=2&cmid=1",
+    "path": "/local/antiplagiarsena/get_student_doc.php?id=1&user=aprendiz_lab",
     "method": "GET",
     "allow": ["A"],
-    "note": "full text of a learner's submitted document; only the instructor may read it"
+    "note": "texto completo del documento entregado por un aprendiz; solo el instructor debe leerlo. Params reales: id=assign, user=username (get_student_doc.php:14-15)"
   },
   {
-    "path": "/local/antiplagiarsena/get_student_results.php?userid=2&cmid=1",
+    "path": "/local/antiplagiarsena/get_student_results.php?id=1&user=aprendiz_lab",
     "method": "GET",
     "allow": ["A"],
-    "note": "similarity results per learner"
+    "note": "resultados de similitud por aprendiz (get_student_results.php:18)"
   },
   {
-    "path": "/local/antiplagiarsena/get_reports.php?cmid=1",
+    "path": "/local/antiplagiarsena/get_reports.php?id=1",
     "method": "GET",
     "allow": ["A"],
-    "note": "report list for the whole activity: every learner's score in one response"
+    "note": "listado de reportes de la actividad: la nota de todos los aprendices en una sola respuesta"
   },
   {
-    "path": "/local/antiplagiarsena/get_data.php?cmid=1",
+    "path": "/local/antiplagiarsena/get_data.php?id=1",
     "method": "GET",
     "allow": ["A"],
-    "note": "activity data including the enrolled users"
+    "note": "datos de la actividad incluyendo entregas con nombre/usuario de cada aprendiz"
   },
   {
-    "path": "/local/antiplagiarsena/fix_criteria.php",
-    "method": "POST",
-    "allow": ["A"],
-    "note": "overrides the similarity a learner is graded on — a learner must never reach it"
-  },
-  {
-    "path": "/local/antiplagiarsena/release_student.php",
-    "method": "POST",
-    "allow": ["A"],
-    "note": "publishes a report to a learner; a learner releasing their own is self-service grading"
-  },
-  {
-    "path": "/local/antiplagiarsena/download.php?id=1",
-    "method": "GET",
-    "allow": ["A"],
-    "note": "report download by numeric id — the classic IDOR: guessable, and the object is a person's document"
-  },
-  {
-    "path": "/local/antiplagiarsena/download_historico.php?cmid=1",
-    "method": "GET",
-    "allow": ["A"],
-    "note": "historical export for the activity"
-  },
-  {
-    "path": "/local/antiplagiarsena/cross_report.php?cmid=1",
-    "method": "GET",
-    "allow": ["A"],
-    "note": "cross-course matches: exposes learners from other courses"
-  },
-  {
-    "path": "/local/antiplagiarsena/get_my_report.php",
+    "path": "/local/antiplagiarsena/get_lines.php?activityid=1",
     "method": "GET",
     "allow": ["A", "B"],
-    "note": "a learner's OWN report — both roles legitimately reach this one"
+    "note": "listado de lineas de analisis. La regla lo declara alcanzable por ambos roles autenticados; lo que este motor NO mide es el acceso anonimo, verificado aparte con curl sin sesion"
+  },
+  {
+    "path": "/local/antiplagiarsena/fix_criteria.php?id=1&user=aprendiz_lab",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "sobreescribe la similitud con la que se califica; un aprendiz nunca debe alcanzarlo. Escritura contra el aprendiz sembrado por el laboratorio, no contra datos del proyecto"
+  },
+  {
+    "path": "/local/antiplagiarsena/release_student.php?id=1&user=aprendiz_lab",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "publica el reporte al aprendiz; que el aprendiz lo libere seria autocalificacion"
+  },
+  {
+    "path": "/local/antiplagiarsena/download.php?id_process=1&course_id=2&activity_id=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "descarga del reporte por id numerico (download.php:5-7)"
+  },
+  {
+    "path": "/local/antiplagiarsena/download_historico.php?activityid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "exportacion historica de la actividad (download_historico.php:8-10)"
+  },
+  {
+    "path": "/local/antiplagiarsena/cross_report.php?id=1",
+    "method": "GET",
+    "allow": [],
+    "note": "cruce entre cohortes con identidades: capability vercruce solo para manager, ni instructor ni aprendiz (db/access.php)"
+  },
+  {
+    "path": "/local/antiplagiarsena/get_my_report.php?id=1",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "reporte propio del aprendiz: ambos roles llegan legitimamente"
   }
 ]
