@@ -1,0 +1,14 @@
+# Qodana (JetBrains) — IDE-grade inspections, complements SonarQube.
+# The linter IMAGE is chosen per target via QODANA_IMAGE in target.env; this file only
+# carries the profile and exclusions.
+version: "1.0"
+profile:
+  name: qodana.recommended
+exclude:
+  - name: All
+    paths:
+      - vendor
+      - node_modules
+      - dist
+      - __pycache__
+      - .venv

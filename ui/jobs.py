@@ -163,8 +163,12 @@ class Runner:
             with open(job.log_path, "w", encoding="utf-8", buffering=1) as log:
                 log.write(f"$ make {goal} TARGET={target}\n\n")
                 try:
+                    # `goal` puede traer VARIOS objetivos separados por espacio: make los ejecuta
+                    # en orden, y parando en el primero que falle. Es lo que permite reejecutar
+                    # solo las herramientas que el operador eligió tras un arreglo del dev, en vez
+                    # de repetir la corrida entera — que es lo que hacía que nadie la repitiera.
                     proc = subprocess.Popen(
-                        ["make", goal, f"TARGET={target}"],
+                        ["make", *goal.split(), f"TARGET={target}"],
                         cwd=LAB, env=env, stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT, text=True, bufsize=1,
                     )

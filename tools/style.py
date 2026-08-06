@@ -138,3 +138,123 @@ margin:0 0 16px;font-size:13.5px}
 def css(*parts: str) -> str:
     """BASE plus whichever slices the page needs."""
     return BASE + "".join(parts)
+
+
+# Estilos de la vista de TUBERÍA (ui/pipeline.py). Cuatro columnas — entrada, herramienta, salida,
+# análisis — para que se lea de izquierda a derecha como el diagrama conceptual, en vez de como una
+# rejilla de botones de `make`.
+PIPELINE = """
+.stage-head{display:grid;grid-template-columns:1.4fr 1.5fr 1.2fr 1.6fr;gap:0;
+  border:1px solid var(--line);border-bottom:none;border-radius:10px 10px 0 0;overflow:hidden}
+.stage-head>div{padding:10px 14px;background:var(--card);font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);border-right:1px solid var(--line)}
+.stage-head>div:last-child{border-right:none}
+.stage-head b{display:block;color:var(--fg);font-size:13px;letter-spacing:0;text-transform:none}
+.dim{display:grid;grid-template-columns:1.4fr 1.5fr 1.2fr 1.6fr;gap:0;
+  border:1px solid var(--line);border-top:none}
+.dim:last-child{border-radius:0 0 10px 10px}
+.dim>div{padding:12px 14px;border-right:1px solid var(--line);min-width:0}
+.dim>div:last-child{border-right:none}
+.dim.na{opacity:.55}
+.dim .name{font-weight:600}
+.dim .tool{color:var(--muted);font-size:12px}
+.key{display:inline-block;font-family:ui-monospace,monospace;font-size:11px;padding:1px 6px;
+  border-radius:4px;background:var(--line);margin:2px 3px 2px 0}
+.key.no{background:#7f1d1d;color:#fff}
+.key.si{background:#14532d;color:#fff}
+.st{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.st.ok{background:#14532d;color:#fff}
+.st.norun{background:#7f1d1d;color:#fff}
+.st.na{background:var(--line);color:var(--muted)}
+.why{font-size:12px;color:var(--muted);margin-top:6px}
+.cost{font-size:11px;color:var(--muted);margin-top:6px}
+.art{font-family:ui-monospace,monospace;font-size:11px;word-break:break-all}
+.who{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.who button{font-size:11px;padding:4px 9px;border-radius:6px;border:1px solid var(--line);
+  background:transparent;color:var(--fg);cursor:pointer}
+.who button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.who button:disabled{opacity:.4;cursor:not-allowed}
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:10px 0 18px}
+@media(max-width:1100px){.stage-head{display:none}
+  .dim{grid-template-columns:1fr;gap:0}
+  .dim>div{border-right:none;border-bottom:1px solid var(--line)}}
+"""
+
+
+def sev_bar(sev: dict) -> str:
+    """La barra de severidad. Compartida por el informe y por la interfaz a proposito: dos
+    implementaciones acabarian pintando proporciones distintas del mismo dato."""
+    import html as _h  # noqa: PLC0415
+    del _h
+    orden = ["critical", "high", "medium", "low", "unranked"]
+    total = sum(sev.values()) or 1
+    partes = "".join(
+        f'<i class="s-{k}" style="width:{sev[k] / total * 100:.1f}%"></i>'
+        for k in orden if sev.get(k)
+    )
+    return f'<div class="sevbar">{partes}</div>'
+
+
+def sev_chips(sev: dict) -> str:
+    orden = ["critical", "high", "medium", "low", "unranked"]
+    chips = "".join(
+        f'<span class="chip">{k} <b>{sev[k]}</b></span>' for k in orden if sev.get(k)
+    )
+    return f'<div class="chips">{chips}</div>' if chips else ""
+
+
+# Triaje a UN CLIC. Sin `select`: seis botones por hallazgo, y el hallazgo juzgado se retira de la
+# pila. Los colores no son decoración — separan «frena el despliegue» de «no lo frena» de un
+# vistazo, que es la decisión que se está tomando.
+TRIAGE = """
+.row{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;
+  background:var(--card)}
+.row .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+.row .loc{font-family:ui-monospace,monospace;font-size:12px;color:var(--muted)}
+.row .msg{font-size:13px;margin:6px 0 10px;white-space:pre-wrap;word-break:break-word}
+.jb{display:flex;gap:6px;flex-wrap:wrap}
+.jb .j{font-size:12px;padding:6px 11px;border-radius:7px;cursor:pointer;border:1px solid var(--line);
+  background:transparent;color:var(--fg);font-weight:600}
+.jb .j:hover{filter:brightness(1.25)}
+.jb .j:disabled{opacity:.4;cursor:wait}
+/* Con `.jb` delante A PROPOSITO: `.jb .j` ya fija background:transparent y tiene DOS clases de
+   especificidad, asi que una regla de una sola clase (`.j-bloqueante`) no la pisaba y los seis
+   botones salian identicos — justo lo contrario de lo que el color existe para hacer. */
+/* Frena el despliegue */
+.jb .j-bloqueante{background:#7f1d1d;border-color:#b91c1c;color:#fff}
+/* Real, no frena */
+.jb .j-corregir{background:#78350f;border-color:#b45309;color:#fff}
+/* La herramienta se equivoco */
+.jb .j-falso-positivo{background:#14532d;border-color:#15803d;color:#fff}
+/* Real y no se persigue: gris a proposito, no es una victoria */
+.jb .j-deuda,.jb .j-aceptado,.jb .j-fuera-de-alcance{background:transparent;color:var(--muted)}
+details.arch{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:8px;
+  background:var(--card)}
+details.arch summary{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+details.arch ul{margin:10px 0 4px;padding-left:18px}
+details.arch li{font-size:12px;margin-bottom:4px}
+button.undo{font-size:11px;padding:2px 7px;border-radius:5px;border:1px solid var(--line);
+  background:transparent;color:var(--muted);cursor:pointer}
+"""
+
+
+# Barra de ejecución selectiva: la tubería como un CI/CD, no como una lista de botones.
+RUNBAR = """
+.runbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 10px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.runbar .btn.sel{font-size:12px;padding:4px 10px}
+.pick{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);
+  cursor:pointer;user-select:none}
+.pick input{cursor:pointer}
+"""
+
+
+# Barra de ejecución selectiva: la tubería como un CI/CD, no como una lista de botones sueltos.
+RUNBAR = """
+.runbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 10px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.runbar .btn.sel{font-size:12px;padding:4px 10px}
+.pick{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);
+  cursor:pointer;user-select:none}
+.pick input{cursor:pointer;width:15px;height:15px}
+"""

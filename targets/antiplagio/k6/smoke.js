@@ -9,8 +9,14 @@
 import http from 'k6/http';
 import { check, group } from 'k6';
 
-const BASE = __ENV.BASE_URL;           // http://moodle:8080 dentro de la red del compose
-const API = __ENV.API_INTERNAL_URL || 'http://api:8030';
+// DOS puertas, dos variables. Antes: BASE=__ENV.BASE_URL y API con un defecto fijo
+// 'http://api:8030'. Apuntando el laboratorio al despliegue real del 166 eso pegaba
+// /login/index.php contra la API (404) y /health contra un nombre de compose que no resuelve:
+// 76.209 peticiones, 100% de error, y un p95 de 2,1 ms que era la latencia de los FALLOS.
+// El defecto fijo es lo peor de los dos: hace que el script parezca configurado cuando no lo esta.
+const BASE = __ENV.MOODLE_URL || __ENV.BASE_URL;   // el Moodle que hospeda el plugin
+const API = __ENV.API_INTERNAL_URL;                // la API antiplagio
+if (!API) throw new Error('API_INTERNAL_URL vacio: sin objetivo de API, fallar en vez de medir humo.');
 
 if (!BASE) {
   throw new Error('BASE_URL vacio: sin objetivo, fallar. Un smoke contra "undefined" sale verde.');

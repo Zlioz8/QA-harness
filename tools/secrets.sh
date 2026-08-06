@@ -95,3 +95,19 @@ else
   done
 fi
 echo "secrets: trufflehog corroboration in $REPORTS/trufflehog.txt ($(wc -l < "$REPORTS/trufflehog.txt" 2>/dev/null || echo 0) hits)"
+
+# Sin esta conversión, todo lo anterior se perdía. El .txt no lo leía NADIE: ni tools/gate.sh, ni
+# la tabla de cobertura de run-manifest.sh, ni el informe, ni las pantallas de triaje. Una
+# dimensión que se ejecuta, deja artefacto y no llega al veredicto es exactamente el modo de fallo
+# que este laboratorio existe para no cometer — el mismo que motivó zap-sarif.py y sonar-export.
+#
+# Y aquí duele más que en ningún otro sitio: TruffleHog es la única herramienta del lab que
+# VERIFICA contra la API del proveedor si la credencial sigue viva. Al convertir por primera vez
+# los .txt que ya había en disco aparecieron DOS credenciales de Azure verificadas vivas en
+# costos_web (.env y .env.testing), que llevaban ahí sin que las viera nadie.
+tools/trufflehog-sarif.py "$REPORTS" || true
+
+# Procedencia: contra que midio esta dimension. Sin esto, su artefacto no se puede
+# atribuir a un blanco y el gate no puede excluirlo cuando el perfil cambia de sistema.
+tools/stamp.sh "$TARGET" gitleaks 2>/dev/null || true
+tools/stamp.sh "$TARGET" trufflehog 2>/dev/null || true

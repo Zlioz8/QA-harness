@@ -37,14 +37,87 @@ EOF
   exit 2
 fi
 
-URL="${BASE_URL%/}${HEALTH_PATH}"
-# -k: local deployments routinely serve a self-signed cert (the stack's own nginx does). Every
-# scanner in this lab already sets ignoreHTTPSErrors; the liveness probe must match, or a healthy
-# https app reads as "nothing answered" (000) and the whole live pipeline aborts on a cert.
-CODE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 "$URL" 2>/dev/null)
+HEALTH_EXPECT=$(envget HEALTH_EXPECT)
+
+# HEALTH_PATH puede ser una URL COMPLETA. Un sistema no siempre tiene una sola puerta: en
+# antiplagio, BASE_URL es el Moodle (que es lo que conduce Playwright) y el health de verdad vive
+# en la API FastAPI, otro servicio en otro puerto. Concatenar a la fuerza obligaba a elegir una de
+# las dos y comprobar la que no era.
+case "$HEALTH_PATH" in
+  http://*|https://*) URL="$HEALTH_PATH" ;;
+  *)                  URL="${BASE_URL%/}${HEALTH_PATH}" ;;
+esac
+
+# -k: los despliegues locales sirven habitualmente un certificado autofirmado (el nginx de este
+# stack lo hace). Todos los escáneres del lab ya ponen ignoreHTTPSErrors; la sonda de vida debe
+# hacer lo mismo, o una app https sana se lee como "no respondió nada" (000) y el pipeline en vivo
+# aborta por un certificado.
+probe() { curl -sk --max-time 10 -w '\n%{http_code}' "$1" 2>/dev/null; }
+
+RESP=$(probe "$URL")
+CODE="${RESP##*$'\n'}"
+BODY="${RESP%$'\n'*}"
 
 if [ "$CODE" = "200" ]; then
-  echo "live check: $URL -> 200"
+  # UN 200 NO ES PRUEBA DE NADA POR SÍ SOLO.
+  #
+  # Encontrado apuntando el laboratorio al despliegue real del servidor 166: su nginx devuelve la
+  # MISMA página de 37.714 bytes para /zajuna/health, para /zajuna/esto-no-existe-xyz123 y para
+  # cualquier ruta inventada. La sonda daba 200, el lab declaraba "la aplicación responde: todas
+  # las dimensiones en vivo disponibles", y lo habría declarado igual con la API caída.
+  #
+  # Es EXACTAMENTE el fallo que describe la cabecera de este archivo: un informe verde sobre una
+  # aplicación que no estaba. Un catch-all convierte HEALTH_PATH en decoración.
+  #
+  # Se detecta solo, sin configuración nueva: se pide una ruta que no puede existir y se compara.
+  # Si contesta lo mismo, la comprobación no prueba nada.
+  case "$URL" in
+    */) DECOY="${URL}__seclab_probe_$$_no_existe" ;;
+    *)  DECOY="${URL%/*}/__seclab_probe_$$_no_existe" ;;
+  esac
+  DRESP=$(probe "$DECOY")
+  DCODE="${DRESP##*$'\n'}"
+  DBODY="${DRESP%$'\n'*}"
+
+  if [ "$DCODE" = "200" ] && [ "$DBODY" = "$BODY" ]; then
+    echo
+    echo "  ABORTADO: $URL -> 200, pero NO PRUEBA NADA."
+    echo
+    echo "  Una ruta inventada devuelve exactamente lo mismo:"
+    echo "    $DECOY -> $DCODE, cuerpo idéntico ($(printf '%s' "$BODY" | wc -c) bytes)"
+    echo
+    echo "  Es un catch-all: este servidor responde 200 a todo bajo esa ruta, así que la sonda"
+    echo "  daría verde con la aplicación caída. Eso es justo lo que HEALTH_PATH existe para"
+    echo "  evitar — sin él no se distingue «sin hallazgos» de «no había nada corriendo»."
+    echo
+    echo "  Arréglalo de una de estas dos formas:"
+    echo "    1. Apunta HEALTH_PATH a un endpoint de salud DE VERDAD. Admite una URL completa,"
+    echo "       así que puede ser otro servicio y otro puerto que BASE_URL — útil cuando el"
+    echo "       sistema tiene dos puertas (un CMS y su API, por ejemplo):"
+    echo "         HEALTH_PATH=http://<host-de-la-api>:<puerto>/health"
+    echo "    2. Exige contenido, no solo código, con:"
+    echo "         HEALTH_EXPECT={\"status\":\"ok\"}"
+    echo
+    exit 1
+  fi
+
+  # Comprobación de contenido, opcional pero recomendada: es la única que sobrevive a un proxy
+  # que interpone su propia página de error con código 200.
+  if [ -n "$HEALTH_EXPECT" ] && ! printf '%s' "$BODY" | grep -qF -- "$HEALTH_EXPECT"; then
+    echo
+    echo "  ABORTADO: $URL -> 200, pero el cuerpo no contiene HEALTH_EXPECT."
+    echo
+    echo "    esperado: $HEALTH_EXPECT"
+    echo "    recibido: $(printf '%s' "$BODY" | head -c 120)"
+    echo
+    echo "  Un 200 con el cuerpo equivocado suele ser un proxy o una página de error que no"
+    echo "  supo devolver un 5xx. La aplicación NO está sirviendo lo que dice servir."
+    echo
+    exit 1
+  fi
+
+  echo "live check: $URL -> 200${HEALTH_EXPECT:+ (contiene «$HEALTH_EXPECT»)}"
+  echo "            ruta inventada -> ${DCODE:-000}: la comprobación distingue de verdad"
   exit 0
 fi
 

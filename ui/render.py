@@ -38,7 +38,7 @@ def page(title: str, body: str, active: str = "") -> str:
 
     return f"""<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{E(title)}</title><style>{style.css(style.REPORT, style.UI)}</style></head><body>
+<title>{E(title)}</title><style>{style.css(style.REPORT, style.UI, style.PIPELINE, style.TRIAGE, style.RUNBAR)}</style></head><body>
 <nav><span class="brand">QA-harness</span>
 {nav('/', 'Proyectos', 'home')}
 {nav('/new', 'Añadir proyecto', 'new')}
@@ -82,37 +82,180 @@ def _action_button(target: str, goal: str, desc: str, disabled: str) -> str:
             f'</form>')
 
 
+def _stage_input(r, target):
+    """Etapa 1 — QUE PIDE esta herramienta. Cada clave del perfil, con si esta rellena o no."""
+    chips = []
+    for group in r["inputs"]:
+        etiqueta = " o ".join(group)
+        falta = etiqueta in r["missing"]
+        chips.append(f'<span class="key {"no" if falta else "si"}">{E(etiqueta)}</span>')
+    faltan = (f'<div class="why">Falta rellenar {len(r["missing"])} de {len(r["inputs"])} — '
+              f'<a href="/t/{E(target)}/config">editar el perfil</a></div>') if r["missing"] else ""
+    cuerpo = "".join(chips) or '<span class="tool">sin entradas</span>'
+
+    # EL GUION: el archivo que la herramienta interpreta. Es el TECHO de la cobertura, no una
+    # entrada mas — un k6 de tres peticiones y una campana de diez guiones se pintaban igual.
+    g = r.get("guion")
+    guion_html = ""
+    if g:
+        estado_cls = {"propio": "si", "de plantilla": "no", "vacío": "no", "ausente": "no"}
+        alcance = (f' · <b>{g["n"]}</b> {E(g.get("unidad", ""))}' if g["n"] else "")
+        toca = (f'<div class="why">ejercita: {E(", ".join(g["toca"][:4]))}</div>'
+                if g["toca"] else "")
+        nota = f'<div class="why">{E(g["nota"])}</div>' if g.get("nota") else ""
+        guion_html = (
+            f'<div style="margin-top:10px">'
+            f'<span class="tool">guion · {E(g["kind"])}</span><br>'
+            f'<span class="key {estado_cls.get(g["estado"], "no")}">{E(g["rel"])}</span>'
+            f'<span class="tool"> {E(g["estado"])}{alcance}</span>'
+            f'{toca}{nota}</div>')
+
+    # EL OBJETO auditado cuando no es el codigo: el binario firmado, una imagen, el contrato.
+    obj = ""
+    if r.get("objeto_pide"):
+        puesto = bool(r.get("objeto"))
+        obj = (f'<div style="margin-top:8px"><span class="tool">objeto auditado</span><br>'
+               f'<span class="key {"si" if puesto else "no"}">'
+               f'{E(r["objeto"][0] if puesto else r["objeto_pide"])}</span></div>')
+
+    return (f'<div><div class="name">{E(r["label"])}</div>'
+            f'<div class="tool">{E(r["tool"])}</div>'
+            f'<div style="margin-top:8px">{cuerpo}</div>'
+            f'{obj}{guion_html}{faltan}</div>')
+
+
+def _stage_tool(r, target, blocked_reason):
+    """Etapa 2 — la herramienta: estado en TRES valores, su coste, y CÓMO se corre.
+
+    La casilla es lo que convierte esto en una tubería de CI/CD y no en una lista de botones.
+    El caso real: el operador QA devuelve observaciones al equipo de desarrollo, el dev arregla
+    tres cosas del código y nada del despliegue. Reejecutar las diecisiete dimensiones para
+    comprobar tres arreglos cuesta media hora de máquina y varias JVM — así que no se reejecuta,
+    y el informe envejece. Marcando solo `semgrep` y `sonar` se comprueba lo que cambió.
+
+    La procedencia se pinta aquí porque cambia lo que significa el estado: una dimensión
+    `ejecutada` pero EXCLUIDA no aporta evidencia sobre este sistema, y hay que verlo antes de
+    decidir si merece la pena reejecutarla.
+    """
+    cls = {"ejecutada": "ok", "NO EJECUTADA": "norun"}.get(r["estado"], "na")
+    motivo = f'<div class="why">{E(r["motivo"])}</div>' if r["motivo"] else ""
+    medido = "medido" if r["medido"] else "estimado"
+    coste = f'<div class="cost">{E(r["clase"])} · {E(r["mem"])} ({medido})</div>'
+    dis = blocked_reason or (", ".join(r["missing"]) if r["missing"] else "")
+
+    prov = ""
+    if r.get("prov") == "excluida":
+        prov = f'<div class="why"><b>EXCLUIDA del veredicto</b> — {E(r["prov_detalle"])}</div>'
+
+    # Sin casilla cuando le falta una entrada: marcarla para correr solo produciría un fallo.
+    marca = "" if dis else (
+        f'<label class="pick"><input type="checkbox" name="dim" '
+        f'value="{E(r["goal"])}" form="runsel"> correr</label>')
+    btn = _action_button(target, r["goal"], f'correr {r["goal"]} ahora', dis)
+    return (f'<div><span class="st {cls}">{E(r["estado"])}</span>{motivo}{prov}{coste}'
+            f'<div style="margin-top:8px">{marca}</div>'
+            f'<div style="margin-top:6px">{btn}</div></div>')
+
+
+def _stage_output(r, target):
+    """Etapa 3 — la SALIDA: el artefacto por su nombre. Que 'corrio y no dejo nada' se vea."""
+    if r["estado"] != "ejecutada":
+        return f'<div><span class="art">{E(r["artifact"])}</span>' \
+               f'<div class="why">sin artefacto</div></div>'
+    n = r["count"]
+    cuenta = (f'<div style="margin-top:6px"><b>{n}</b> hallazgos</div>' if n is not None
+              else '<div style="margin-top:6px">presente</div>')
+    barra = style.sev_bar(r["sev"]) if r["sev"] and any(r["sev"].values()) else ""
+    grad = "" if r["graduado"] is not False else \
+        '<div class="why">sin graduar: la herramienta no dio severidad, así que un umbral de ' \
+        'conteo sobre esto es una cifra inventada</div>'
+    return f'<div><a class="art" href="/t/{E(target)}/artifact/{E(r["link"])}">' \
+           f'{E(r["link"])}</a>{cuenta}{barra}{grad}</div>'
+
+
+def _stage_analysis(r, target, _ai=None):
+    """Etapa 4 — analizar. DOS acciones, y ninguna decorativa.
+
+    Antes había tres botones: «Ver y juzgar» más «lo analizo yo» / «que lo prepare la IA».
+    Los dos últimos solo escribían una marca en un archivo: no abrían nada, no preparaban nada,
+    no cambiaban el veredicto. Un botón que no hace lo que su etiqueta promete es peor que no
+    tenerlo — invita a pulsarlo y enseña que la interfaz miente.
+
+      · Ver y juzgar  → la pila de hallazgos de ESTA dimensión, a un clic por hallazgo
+      · Analizar      → los documentos EN BRUTO que dejó la herramienta, con descarga
+
+    Analizar existe porque el juicio no se puede sostener solo sobre lo que esta interfaz decide
+    mostrar. El SARIF resumido aquí lleva 400 caracteres del mensaje; el crudo lleva la traza, el
+    fragmento de código y la regla completa. Quien tenga que decidir si algo frena un despliegue
+    necesita el documento del fabricante, no mi resumen de él.
+    """
+    if r["estado"] != "ejecutada":
+        return '<div><span class="tool">nada que analizar todavía</span></div>'
+
+    ver = ""
+    if r["triage"] and r["count"]:
+        ver = (f'<a class="btn primary" href="/t/{E(target)}/findings?tool={E(r["id"])}">'
+               f'Ver y juzgar</a>')
+    elif not r["triage"]:
+        ver = '<span class="tool">sin triaje: es una medida, no una lista de hallazgos</span>'
+
+    analizar = (f'<a class="btn" href="/t/{E(target)}/outputs/{E(r["id"])}">Analizar</a>')
+    return f'<div><div class="actions">{ver}{analizar}</div></div>'
+
+
 def target_page(name: str, tier: int, live: str, blocked: list[tuple[str, str]],
                 groups: dict[str, list[tuple[str, str]]], jobs: list, msg: str = "",
-                kind: str = "ok", has_report: bool = False) -> str:
+                kind: str = "ok", has_report: bool = False,
+                pipe: dict | None = None) -> str:
+    """La pantalla de proyecto como TUBERIA, no como rejilla de botones de `make`.
+
+    Cuatro columnas, en el orden del diagrama conceptual del que salio este diseño:
+    entrada (.env) -> herramientas -> salidas -> analisis. Antes eran tres grupos de botones
+    etiquetados code/live/admin: eso describe QUE NECESITAS TRAER, que es util, pero no es el
+    proceso. Aqui esa taxonomia baja a nota, y lo que manda es la secuencia.
+
+    Todo se genera del registro: una dimension nueva aparece en las cuatro columnas sin tocar
+    este archivo.
+    """
     cls, rung_name, rung_help = RUNGS.get(tier, ("r1", "Peldaño ?", ""))
+    pipe = pipe or {"rows": [], "resumen": {}}
 
     blocked_goals: dict[str, str] = {}
     for goals, reason in blocked:
         for g in goals.split(","):
             blocked_goals[g.strip()] = reason
 
-    def group_html(key: str, heading: str, sub: str) -> str:
-        items = groups.get(key, [])
-        if not items:
-            return ""
-        btns = "".join(_action_button(name, g, d, blocked_goals.get(g, "")) for g, d in items)
-        note = ""
-        if key == "live" and blocked_goals:
-            reasons = "<br>".join(E(r) for r in dict.fromkeys(blocked_goals.values()))
-            note = f'<p class="blocked">{reasons}</p>'
-        return f"""<div class="group"><div class="head"><b>{E(heading)}</b>
-<span>{E(sub)}</span></div><div class="actions">{btns}</div>{note}</div>"""
+    filas = []
+    for r in pipe["rows"]:
+        extra = " na" if r["estado"] == "no aplica" else ""
+        filas.append(
+            f'<div class="dim{extra}" data-estado="{E(r["estado"])}" '
+            f'data-prov="{E(r.get("prov", "ok"))}" data-live="{"1" if r["live"] else "0"}">'
+            f'{_stage_input(r, name)}'
+            f'{_stage_tool(r, name, blocked_goals.get(r["goal"], ""))}'
+            f'{_stage_output(r, name)}'
+            f'{_stage_analysis(r, name)}'
+            '</div>')
 
-    rows = "".join(
+    res = pipe["resumen"]
+    resumen = (f'<div class="chips">'
+               f'<span class="chip">ejecutadas <b>{res.get("ejecutadas",0)}</b></span>'
+               f'<span class="chip">NO ejecutadas <b>{res.get("no_ejecutadas",0)}</b></span>'
+               f'<span class="chip">no aplican <b>{res.get("no_aplican",0)}</b></span>'
+               f'<span class="chip">hallazgos <b>{res.get("hallazgos",0)}</b></span>'
+               f'<span class="chip">sin juzgar <b>{res.get("sin_juzgar",0)}</b></span>'
+               f'</div>')
+
+    admin = groups.get("admin", [])
+    admin_btns = "".join(_action_button(name, g, d, "") for g, d in admin)
+
+    rows_jobs = "".join(
         f'<tr><td><a href="/job/{E(j.id)}">{E(j.goal)}</a></td>'
         f'<td>{E(j.status)}</td>'
         f'<td class="num">{"" if j.exit_code is None else j.exit_code}</td></tr>'
-        for j in jobs[:12]
+        for j in jobs[:8]
     ) or '<tr><td colspan="3">Sin corridas todavía.</td></tr>'
 
-    # The findings explorer is offered whether or not the report has been built: it reads the
-    # artifacts directly, and it is where the raw output actually gets looked at.
     report = (f'<a class="btn primary" href="/t/{E(name)}/findings">Explorar hallazgos</a>'
               f'<a class="btn" href="/t/{E(name)}/report">Ver informe</a>'
               if has_report else
@@ -123,17 +266,61 @@ def target_page(name: str, tier: int, live: str, blocked: list[tuple[str, str]],
 <h1>{E(name)}</h1>
 <p class="sub"><span class="rung {cls}">{E(rung_name)}</span></p>
 <div class="note">{E(rung_help)}</div>
+{resumen}
 
-{group_html("code", "Análisis del código", "no necesita la aplicación corriendo")}
-{group_html("live", "Medición en vivo", "necesita la aplicación respondiendo")}
-{group_html("admin", "Mantenimiento", "")}
+<div class="legend">
+  <span><span class="st ok">ejecutada</span> hay artefacto</span>
+  <span><span class="st norun">NO EJECUTADA</span> se podía correr y no se corrió</span>
+  <span><span class="st na">no aplica</span> este perfil no puede medirlo — no es «sin hallazgos»</span>
+</div>
+
+<form id="runsel" method="post" action="/t/{E(name)}/run-selected"></form>
+<div class="runbar">
+  <button class="btn primary" type="submit" form="runsel">Correr las marcadas</button>
+  <span class="tool">o marca rápido:</span>
+  <button class="btn sel" type="button" data-sel="todas">todas</button>
+  <button class="btn sel" type="button" data-sel="ninguna">ninguna</button>
+  <button class="btn sel" type="button" data-sel="norun">las NO ejecutadas</button>
+  <button class="btn sel" type="button" data-sel="excl">las excluidas</button>
+  <button class="btn sel" type="button" data-sel="codigo">solo las de código</button>
+</div>
+<div class="stage-head">
+  <div>1 · entrada<b>qué pide cada herramienta</b></div>
+  <div>2 · herramienta<b>estado y coste</b></div>
+  <div>3 · salida<b>el artefacto que dejó</b></div>
+  <div>4 · análisis<b>juzgar, o leer el original</b></div>
+</div>
+{''.join(filas)}
+
+<script>
+// Selectores rapidos. El que de verdad importa es "las NO ejecutadas": es el que usa el operador
+// cuando vuelve tras un arreglo del dev y no quiere repetir la corrida entera — que es justo lo
+// que hacia que no la repitiera nadie.
+document.querySelectorAll('button.sel').forEach(function(b) {{
+  b.addEventListener('click', function() {{
+    var q = b.dataset.sel;
+    document.querySelectorAll('.dim').forEach(function(d) {{
+      var cb = d.querySelector('input[name=dim]');
+      if (!cb) return;              // sin casilla = le falta una entrada, no se puede correr
+      if (q === 'todas') cb.checked = true;
+      else if (q === 'ninguna') cb.checked = false;
+      else if (q === 'norun') cb.checked = d.dataset.estado === 'NO EJECUTADA';
+      else if (q === 'excl') cb.checked = d.dataset.prov === 'excluida';
+      else if (q === 'codigo') cb.checked = d.dataset.live === '0';
+    }});
+  }});
+}});
+</script>
 
 <h2>Informe</h2>
 <div class="actions">{report}
 <a class="btn" href="/t/{E(name)}/config">Configuración</a></div>
 
+<h2>Mantenimiento</h2>
+<div class="actions">{admin_btns}</div>
+
 <h2>Últimas corridas</h2>
-<table><tr><th>Objetivo</th><th>Estado</th><th class="num">Código</th></tr>{rows}</table>""",
+<table><tr><th>Objetivo</th><th>Estado</th><th class="num">Código</th></tr>{rows_jobs}</table>""",
                 "home")
 
 
@@ -172,7 +359,11 @@ def config_page(name: str, prof, msg: str = "", kind: str = "ok") -> str:
             if f.commented:
                 continue
             fid = f"f_{f.key}"
-            req = f'<span class="req" title="{E(f.requirement)}">*</span>' if f.requirement else ""
+            # El asterisco depende de si el campo es imprescindible, NO de si queda texto que
+            # añadir: `requirement` calla cuando el perfil ya lo explica, y antes de separarlos
+            # los campos obligatorios de una plantilla bien documentada perdían la marca.
+            req = (f'<span class="req" title="{E(f.why_required)}">*</span>'
+                   if f.required else "")
             help_bits = [f.help] if f.help else []
             if f.hint:
                 help_bits.append(f"({f.hint})")
@@ -224,291 +415,137 @@ responde tu despliegue — el laboratorio le apuntará sin administrarlo.</div>
 </div></form>""", "new")
 
 
-def triage_page(name: str, blocks: list[dict], counts: dict, msg: str = "") -> str:
-    """`blocks` = [{tool, title, findings:[{key, sev, rule, loc, msg, verdict, note}]}]"""
-    if not blocks:
-        return page(f"QA-harness · {name} · triaje", f"""<h1>Triaje · {E(name)}</h1>
-<p class="sub">Todavía no hay hallazgos que juzgar. Corre algún análisis primero.</p>
-<a class="btn" href="/t/{E(name)}">Volver</a>""", "home")
-
-    sections = []
-    for b in blocks:
-        rows = []
-        for f in b["findings"]:
-            opts = "".join(
-                f'<option value="{v}"{" selected" if f["verdict"] == v else ""}>{E(lbl)}</option>'
-                for v, lbl in [("", "— sin juzgar —"), ("confirmed", "Confirmado"),
-                               ("false-positive", "Falso positivo"),
-                               ("inconclusive", "Inconcluso")]
-            )
-            loc = f'{E(f["loc"])}' + (f':{f["line"]}' if f.get("line") else "")
-            rows.append(f"""<div class="f">
-<div class="top"><span class="sev {f['sev']}">{f['sev'].upper()}</span>
-<span class="rule">{E(f['rule'])}</span></div>
-<div class="loc">{loc}</div>
-<div class="msg">{E(f['msg'][:240])}</div>
-<div style="display:flex;gap:8px;margin-top:7px;flex-wrap:wrap">
-<select name="v__{E(f['key'])}" style="max-width:190px">{opts}</select>
-<input type="text" name="n__{E(f['key'])}" value="{E(f['note'])}"
- placeholder="Por qué. Ej.: falso positivo, Content-Type fijado en la línea 3"
- style="flex:1;min-width:260px"></div></div>""")
-        sections.append(f"""<details open><summary><span>{E(b['title'])}</span>
-<span class="chip">{len(b['findings'])}</span></summary>
-<div class="body">{''.join(rows)}</div></details>""")
-
-    chips = " ".join(
-        f'<span class="chip">{E(lbl)} <b>{counts.get(v, 0)}</b></span>'
-        for v, lbl in [("confirmed", "confirmados"), ("false-positive", "falsos positivos"),
-                       ("inconclusive", "inconclusos")]
-    )
-    return page(f"QA-harness · {name} · triaje", f"""{flash(msg)}
-<h1>Triaje · {E(name)}</h1>
-<p class="sub">Un hallazgo no es un riesgo hasta que alguien decide que lo es.</p>
-<div class="note">Lo que escribas aquí queda junto a los artefactos y aparece en el informe. Sin
-esto, el razonamiento que convierte una lista de hallazgos crudos en una lista de hallazgos
-juzgados se pierde en cuanto quien lo hizo cierra la sesión.</div>
-<div class="chips">{chips}</div>
-<form method="post">{''.join(sections)}
-<div class="actions"><button class="btn primary" type="submit">Guardar triaje</button>
-<a class="btn" href="/t/{E(name)}">Volver</a></div></form>""", "home")
-
-
-_FINDINGS_CSS = """
-.fx .top{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-.fx .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
-.fx .seg button{background:none;border:0;border-right:1px solid var(--line);padding:5px 11px;
- font:inherit;font-size:12px;color:inherit;cursor:pointer}
-.fx .seg button:last-child{border-right:0}
-.fx .seg button.on{background:var(--accent,#2d6cdf);color:#fff}
-.fx .chips-active{display:flex;gap:6px;flex-wrap:wrap;min-height:26px;margin-bottom:10px}
-.fx .fchip{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--line);
- border-radius:20px;padding:2px 6px 2px 10px;font-size:12px}
-.fx .fchip b{font-weight:600}
-.fx .fchip button{background:none;border:0;color:inherit;cursor:pointer;font-size:14px;
- line-height:1;opacity:.6;padding:0 3px}
-.fx .g{border:1px solid var(--line);border-radius:9px;margin-bottom:10px;overflow:hidden}
-.fx .g>summary{cursor:pointer;padding:9px 12px;display:flex;gap:10px;align-items:center;
- flex-wrap:wrap;list-style:none}
-.fx .g>summary::-webkit-details-marker{display:none}
-.fx .g>summary .gt{font-family:ui-monospace,monospace;font-size:13px;word-break:break-all}
-.fx .g>summary .n{margin-left:auto;opacity:.6;font-variant-numeric:tabular-nums}
-.fx .batch{display:flex;gap:6px;padding:0 12px 10px;flex-wrap:wrap;align-items:center;
- font-size:12px}
-.fx .batch select,.fx .batch input{font-size:12px;padding:3px 6px}
-.fx .rows{padding:0 12px 10px}
-.fx .row{border-top:1px solid var(--line);padding:9px 0}
-.fx .row.hid,.fx .g.hid{display:none}
-.fx .row .hd{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:3px}
-.fx .row .loc{font-family:ui-monospace,monospace;font-size:12px;opacity:.85;word-break:break-all}
-.fx .row .msg{font-size:13px;opacity:.75;margin:3px 0}
-.fx .row .jd{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
-.fx .row[data-verdict="false-positive"]{opacity:.5}
-.fx .f{cursor:pointer;border-bottom:1px dotted transparent}
-.fx .f:hover{border-bottom-color:currentColor}
-.fx .save{position:sticky;bottom:0;padding:10px 0;background:var(--bg);
- border-top:1px solid var(--line);margin-top:10px;display:flex;gap:8px;align-items:center}
-"""
-
-# All state lives in the DOM. No framework, no build step — same reasoning as the rest of the UI.
-_FINDINGS_JS = """
-(function(){
- var wrap=document.getElementById('fx-groups');
- var rows=[].slice.call(document.querySelectorAll('.fx .row'));
- var filters=[];              // [{field, value}] — AND across fields, OR within a field
- var groupBy='rule';
- var q=document.getElementById('fx-q');
- var LBL={sev:'Severidad',tool:'Herramienta',dir:'Directorio',rule:'Regla',
-          verdict:'Triaje',path:'Archivo'};
-
- function matches(r){
-   var by={};
-   filters.forEach(function(f){(by[f.field]=by[f.field]||[]).push(f.value);});
-   for(var k in by){ if(by[k].indexOf(r.dataset[k])<0) return false; }
-   var t=(q.value||'').toLowerCase();
-   return !t || r.dataset.hay.indexOf(t)>=0;
- }
-
- function drawChips(){
-   var c=document.getElementById('fx-chips');
-   c.innerHTML='';
-   filters.forEach(function(f,i){
-     var el=document.createElement('span');
-     el.className='fchip';
-     el.innerHTML='<span>'+(LBL[f.field]||f.field)+': <b></b></span>'+
-                  '<button type="button" title="Quitar">&times;</button>';
-     el.querySelector('b').textContent=f.value||'(sin juzgar)';
-     el.querySelector('button').onclick=function(){filters.splice(i,1);draw();};
-     c.appendChild(el);
-   });
-   document.getElementById('fx-clear').hidden=!filters.length&&!q.value;
- }
-
- function draw(){
-   drawChips();
-   var shown=rows.filter(matches);
-   // Rebuild the groups from scratch: one code path serves every grouping key, and the rows
-   // themselves are moved rather than re-rendered, so the verdict/note a user has already typed
-   // into an input survives regrouping.
-   wrap.innerHTML='';
-   var buckets={},order=[];
-   shown.forEach(function(r){
-     var k=r.dataset[groupBy]||'(vacío)';
-     if(!buckets[k]){buckets[k]=[];order.push(k);}
-     buckets[k].push(r);
-   });
-   order.sort(function(a,b){return buckets[b].length-buckets[a].length;});
-   order.forEach(function(k){
-     var d=document.createElement('details');
-     d.className='g'; d.open=order.length<=6;
-     var vs=['','confirmed','false-positive','inconclusive'];
-     var ls=['— sin juzgar —','Confirmado','Falso positivo','Inconcluso'];
-     var opts=vs.map(function(v,i){return '<option value="'+v+'">'+ls[i]+'</option>';}).join('');
-     d.innerHTML='<summary><span class="gt"></span><span class="n">'+buckets[k].length+
-       '</span></summary><div class="batch"><span>Juzgar los '+buckets[k].length+
-       ' de una vez:</span><select class="bv">'+opts+
-       '</select><input class="bn" type="text" placeholder="razón compartida" size="34">'+
-       '<button type="button" class="btn ba">Aplicar</button></div><div class="rows"></div>';
-     d.querySelector('.gt').textContent=k||'(sin valor)';
-     var box=d.querySelector('.rows');
-     buckets[k].forEach(function(r){box.appendChild(r);});
-     d.querySelector('.ba').onclick=function(){
-       var v=d.querySelector('.bv').value, n=d.querySelector('.bn').value;
-       buckets[k].forEach(function(r){
-         r.querySelector('select.v').value=v;
-         if(n) r.querySelector('input.n').value=n;
-         r.dataset.verdict=v;
-       });
-       dirty(); draw();
-     };
-     wrap.appendChild(d);
-   });
-   document.getElementById('fx-shown').textContent=shown.length;
-   document.getElementById('fx-groups-n').textContent=order.length;
- }
-
- function dirty(){document.getElementById('fx-dirty').hidden=false;}
-
- function addFilter(field,value){
-   if(!filters.some(function(f){return f.field===field&&f.value===value;}))
-     filters.push({field:field,value:value});
-   draw();
- }
-
- // Any value on screen is a filter. This is what replaced the checkbox rail: the facets are
- // wherever the data already is, so there is no second list to keep in sync with the first.
- document.querySelector('.fx').addEventListener('click',function(e){
-   var el=e.target.closest('.f');
-   if(!el) return;
-   e.preventDefault();
-   addFilter(el.dataset.field,el.dataset.value);
- });
- [].slice.call(document.querySelectorAll('.seg button')).forEach(function(b){
-   b.onclick=function(){
-     groupBy=b.dataset.group;
-     [].slice.call(document.querySelectorAll('.seg button')).forEach(function(x){
-       x.classList.toggle('on',x===b);});
-     draw();
-   };
- });
- document.getElementById('fx-clear').onclick=function(){filters=[];q.value='';draw();};
- q.addEventListener('input',draw);
- document.querySelector('.fx').addEventListener('change',function(e){
-   if(e.target.matches('select.v')){e.target.closest('.row').dataset.verdict=e.target.value;
-     dirty();draw();}
-   else if(e.target.matches('input.n')) dirty();
- });
- draw();
-})();
-"""
-
-
 def findings_page(name: str, data: dict, msg: str = "") -> str:
-    """Every tool's findings in one place: grouped, filtered by clicking, judged in batches.
+    """Juzgar a UN CLIC. Sin listas desplegables, y el hallazgo juzgado desaparece de la pila.
 
-    No checkbox rail. Grouping answers "what am I looking at" (13 hits of one rule are one
-    decision, not thirteen), and every value on screen doubles as a filter, so the facets live
-    where the data is instead of in a second list beside it. `data` comes from findings.collect().
+    Lo que sustituye: un `<select>` de tres opciones más un campo de texto, por hallazgo. Para
+    juzgar 942 hallazgos eso son ~2.800 interacciones, así que en la práctica nadie juzgaba —
+    el laboratorio tenía 941 sin juzgar y el gate seguía contándolos todos.
+
+    Cómo funciona ahora: seis botones por hallazgo. Un clic guarda y RETIRA la fila de la pila.
+    Lo retirado se apila por criterio, plegado, y se puede devolver. Lo que queda en pantalla
+    es siempre lo que falta por decidir, que es la única cifra que importa mientras se triajea.
+
+    Los criterios y su efecto en el veredicto viven en tools/triage.py, no aquí.
     """
-    from findings import SEV_LABEL, TOOL_LABEL, VERDICT_LABEL  # noqa: PLC0415
+    import triage as tri  # noqa: PLC0415
 
-    if not data["findings"]:
-        pend = [TOOL_LABEL.get(t, t) for t, n in data["ran"].items() if n is None]
-        why = ("Ninguna herramienta ha corrido todavía." if len(pend) == len(data["ran"])
-               else "Las herramientas que corrieron no encontraron nada.")
-        return page(f"QA-harness · {name} · hallazgos", f"""<h1>Hallazgos · {E(name)}</h1>
-<p class="sub">{E(why)}</p>
-<div class="note">Que una herramienta no encuentre nada y que no se haya ejecutado son cosas
-distintas. Sin ejecutar: {E(', '.join(pend) or 'ninguna')}.</div>
-<a class="btn" href="/t/{E(name)}">Volver</a>""", "home")
+    findings = data["findings"]
+    pendientes = [f for f in findings if not f.get("verdict")]
+    juzgados = [f for f in findings if f.get("verdict")]
 
-    def f(field: str, value: str, text: str, cls: str = "") -> str:
-        """A value that is also a filter."""
-        return (f'<span class="f {cls}" data-field="{field}" data-value="{E(value)}">'
-                f'{E(text)}</span>')
+    # Las dimensiones que NO corrieron, dichas por su nombre. Un explorador de hallazgos que
+    # solo muestra lo encontrado hace parecer completo lo que está a medias.
+    no_run = [TOOL_LABEL_FALLBACK(t, data) for t, n in data["ran"].items() if n is None]
+    aviso = (f'<div class="note"><b>NO EJECUTADO:</b> {E(", ".join(no_run))}. '
+             f'Lo que no corrió no aparece aquí, y no verlo no lo vuelve limpio.</div>'
+             if no_run else "")
 
-    rows = []
-    for it in data["findings"]:
-        opts = "".join(
-            f'<option value="{v}"{" selected" if it["verdict"] == v else ""}>{E(lbl)}</option>'
-            for v, lbl in VERDICT_LABEL.items())
-        line = f':{it["line"]}' if it.get("line") else ""
-        hay = " ".join([it["rule"], it["path"], it.get("msg", ""), it.get("name", "")]).lower()
-        rows.append(f"""<div class="row" data-sev="{it['sev']}" data-tool="{E(it['tool'])}"
- data-verdict="{E(it['verdict'])}" data-rule="{E(it['rule'])}" data-dir="{E(it['dir'])}"
- data-path="{E(it['path'])}" data-hay="{E(hay)}">
-<div class="hd">{f('sev', it['sev'], SEV_LABEL.get(it['sev'], it['sev']), 'sev ' + it['sev'])}
-{f('tool', it['tool'], TOOL_LABEL.get(it['tool'], it['tool']), 'chip')}
-{f('rule', it['rule'], it['rule'], 'rule')}</div>
-<div class="loc">{f('path', it['path'], it['path'] + line)}</div>
-<div class="msg">{E((it.get('msg') or '')[:260])}</div>
-<div class="jd"><select class="v" name="v__{E(it['key'])}" style="max-width:180px">{opts}</select>
-<input class="n" type="text" name="n__{E(it['key'])}" value="{E(it['note'])}"
- placeholder="Por qué. Ej.: sólo aparece en docs/, no es una credencial viva"
- style="flex:1;min-width:230px"></div></div>""")
+    def botones(key: str) -> str:
+        bs = []
+        for vid, info in tri.VERDICT_INFO.items():
+            exige = " data-exige=\"" + ",".join(info["exige"]) + "\"" if info["exige"] else ""
+            bs.append(f'<button class="j j-{E(vid)}" data-k="{E(key)}" data-v="{E(vid)}"'
+                      f'{exige} title="{E(info["ayuda"])}">{E(info["label"])}</button>')
+        return '<div class="jb">' + "".join(bs) + "</div>"
 
-    not_run = [TOOL_LABEL.get(t, t) for t, n in data["ran"].items() if n is None]
-    banner = (f'<div class="note"><b>NO EJECUTADO:</b> {E(", ".join(not_run))}. '
-              'Lo que no corrió no aparece aquí, y no verlo no lo vuelve limpio.</div>'
-              if not_run else "")
+    def fila(f: dict) -> str:
+        loc = f'{E(f["path"])}:{f["line"]}' if f["path"] else ""
+        return (f'<div class="row" data-key="{E(f["key"])}" data-sev="{E(f["sev"])}" '
+                f'data-tool="{E(f["tool"])}" data-rule="{E(f["rule"])}">'
+                f'<div class="top"><span class="sev {E(f["sev"])}">{E(f["sev"].upper())}</span>'
+                f'<span class="chip">{E(data["facets"] and f["tool"])}</span>'
+                f'<code>{E(f["rule"])}</code></div>'
+                f'<div class="loc">{loc}</div>'
+                f'<div class="msg">{E(f["msg"])}</div>'
+                f'{botones(f["key"])}</div>')
 
-    def seg(g: str, lbl: str) -> str:
-        on = ' class="on"' if g == "rule" else ""
-        return f'<button type="button" data-group="{g}"{on}>{E(lbl)}</button>'
+    filas = "".join(fila(f) for f in pendientes)
 
-    segs = "".join(seg(g, lbl) for g, lbl in
-                   [("rule", "Regla"), ("path", "Archivo"), ("dir", "Directorio"),
-                    ("sev", "Severidad"), ("tool", "Herramienta"), ("verdict", "Triaje")])
+    # Lo ya archivado, por criterio y plegado: no estorba, pero está.
+    cajas = []
+    for vid, info in tri.VERDICT_INFO.items():
+        grupo = [f for f in juzgados if f.get("verdict") == vid]
+        if not grupo:
+            continue
+        items = "".join(
+            f'<li><code>{E(f["rule"])}</code> <span class="loc">{E(f["path"])}</span>'
+            f'{" — " + E(f["note"]) if f.get("note") else ""}'
+            f' <button class="undo" data-k="{E(f["key"])}">devolver</button></li>'
+            for f in grupo[:200])
+        cajas.append(f'<details class="arch"><summary><b>{E(info["label"])}</b> '
+                     f'<span class="chip">{len(grupo)}</span> '
+                     f'<span class="tool">{E(info["ayuda"])}</span></summary>'
+                     f'<ul>{items}</ul></details>')
 
     return page(f"QA-harness · {name} · hallazgos", f"""{flash(msg)}
 <h1>Hallazgos · {E(name)}</h1>
-<p class="sub">Todo lo que produjo cada herramienta, en una sola lista. Haz clic en cualquier
-valor para filtrar por él. Los artefactos originales no se tocan: filtrar es una forma de mirar,
-nunca de editar.</p>
-{banner}
-<style>{_FINDINGS_CSS}</style>
-<form method="post" class="fx">
- <div class="top">
-  <span>Agrupar por:</span><span class="seg">{segs}</span>
-  <input type="search" id="fx-q" placeholder="Buscar…" style="flex:1;min-width:170px">
-  <button type="button" id="fx-clear" class="btn" hidden>Quitar filtros</button>
- </div>
- <div class="chips-active" id="fx-chips"></div>
- <div class="top">
-  <span>Mostrando <b id="fx-shown">{data['total']}</b> de <b>{data['total']}</b> hallazgos en
-   bruto, en <b id="fx-groups-n">0</b> grupos</span>
-  <span class="chip">confirmados {data['judged'].get('confirmed', 0)}</span>
-  <span class="chip">falsos positivos {data['judged'].get('false-positive', 0)}</span>
-  <span class="chip">inconclusos {data['judged'].get('inconclusive', 0)}</span>
- </div>
- <div id="fx-groups"></div>
- <div class="save">
-  <button class="btn primary" type="submit">Guardar triaje y regenerar informe</button>
-  <span id="fx-dirty" hidden class="chip">cambios sin guardar</span>
-  <a class="btn" href="/t/{E(name)}">Volver</a>
- </div>
- <div hidden id="fx-src">{''.join(rows)}</div>
-</form>
-<script>{_FINDINGS_JS}</script>""", "home")
+<p class="sub">Un clic archiva el hallazgo bajo ese criterio y lo retira de la pila.
+Lo que queda en pantalla es lo que falta por decidir.</p>
+{aviso}
+
+<div class="chips" id="marcador">
+  <span class="chip">pendientes <b id="npend">{len(pendientes)}</b></span>
+  <span class="chip">archivados <b id="njuz">{len(juzgados)}</b></span>
+  <span class="chip">total {len(findings)}</span>
+</div>
+
+<div id="pila">{filas or '<div class="note">Nada pendiente. Todo está juzgado.</div>'}</div>
+
+<h2>Archivados</h2>
+{"".join(cajas) or '<div class="note">Todavía no has archivado nada.</div>'}
+
+<script>
+// Guarda y retira. `fetch` en vez de recargar: recargar 942 hallazgos por cada clic haria el
+// triaje mas lento que el <select> que esto sustituye.
+var TARGET = {name!r};
+document.getElementById('pila').addEventListener('click', function(e) {{
+  var b = e.target.closest('button.j');
+  if (!b) return;
+  var row = b.closest('.row');
+  var exige = (b.dataset.exige || '').split(',').filter(Boolean);
+  var extra = {{}};
+  // Lo que el criterio EXIGE se pide aqui, no despues. Un «riesgo aceptado» sin quien lo asume
+  // ni hasta cuando es «deuda tecnica» con mejor nombre: no caduca y nadie responde por el.
+  var textos = {{nota: 'Razon (obligatoria):', dueno: 'Quien lo asume:', hasta: 'Hasta cuando (AAAA-MM-DD):'}};
+  for (var i = 0; i < exige.length; i++) {{
+    var v = prompt(textos[exige[i]] || exige[i]);
+    if (!v) return;                    // cancelar no archiva: no se pierde el juicio a medias
+    extra[exige[i] === 'nota' ? 'note' : exige[i]] = v;
+  }}
+  b.disabled = true;
+  fetch('/t/' + TARGET + '/judge', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(Object.assign({{key: row.dataset.key, verdict: b.dataset.v}}, extra))
+  }}).then(function(r) {{ return r.json(); }}).then(function(j) {{
+    if (!j.ok) {{ b.disabled = false; alert(j.error || 'no se pudo guardar'); return; }}
+    row.remove();
+    document.getElementById('npend').textContent = j.pendientes;
+    document.getElementById('njuz').textContent = j.juzgados;
+    if (!document.querySelector('#pila .row'))
+      document.getElementById('pila').innerHTML =
+        '<div class="note">Nada pendiente. Recarga para ver el archivo actualizado.</div>';
+  }}).catch(function() {{ b.disabled = false; }});
+}});
+
+// Devolver a la pila. Recarga a proposito: es la accion rara, y asi la pila queda ordenada.
+document.addEventListener('click', function(e) {{
+  var u = e.target.closest('button.undo');
+  if (!u) return;
+  fetch('/t/' + TARGET + '/judge', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{key: u.dataset.k, verdict: ''}})
+  }}).then(function() {{ location.reload(); }});
+}});
+</script>""", "home")
+
+
+def TOOL_LABEL_FALLBACK(tool_id: str, data: dict) -> str:
+    """El nombre legible de una herramienta que no corrió; su id si no hay otra cosa."""
+    for f in data.get("findings", []):
+        if f.get("tool") == tool_id:
+            return tool_id
+    return tool_id
 
 
 def detect_page(name: str, output: str) -> str:
@@ -520,3 +557,52 @@ auditoría acaba midiendo lo que no es.</p>
 <div class="actions">
 <a class="btn primary" href="/t/{E(name)}/config">Completar configuración</a>
 <a class="btn" href="/t/{E(name)}">Ir al proyecto</a></div>""", "new")
+
+
+def outputs_page(name: str, dim: dict, ficheros: list[dict], msg: str = "") -> str:
+    """Los documentos EN BRUTO que dejó una herramienta, para verlos y descargarlos.
+
+    No los renderiza esta interfaz: los enlaza. El resumen que pinta el laboratorio recorta el
+    mensaje a 400 caracteres y se queda con una localización por hallazgo; el documento del
+    fabricante lleva la traza completa, el fragmento de código y la regla entera. Quien decide si
+    algo frena un despliegue tiene que poder leer el original, no mi versión de él.
+
+    Se listan TODOS los ficheros del directorio de la dimensión, no solo el canónico. Un ZAP deja
+    tres (SARIF para el gate, HTML para personas, JSON crudo) y esconder dos porque el laboratorio
+    solo consume uno sería decidir por el operador qué evidencia le sirve.
+    """
+    if not ficheros:
+        cuerpo = ('<div class="note">Esta dimensión no ha dejado ningún documento todavía. '
+                  'Si dice «ejecutada» y aquí no hay nada, el artefacto se perdió por el camino '
+                  'y eso es un fallo, no una corrida limpia.</div>')
+    else:
+        filas = []
+        for f in ficheros:
+            marca = ('<span class="chip">el que lee el gate</span>' if f["canonico"] else "")
+            filas.append(
+                f'<tr><td><code>{E(f["rel"])}</code> {marca}</td>'
+                f'<td class="num">{E(f["tam"])}</td>'
+                f'<td class="num">{E(f["fecha"])}</td>'
+                f'<td class="num">'
+                f'<a class="btn" href="/t/{E(name)}/artifact/{E(f["rel"])}">ver</a> '
+                f'<a class="btn" href="/t/{E(name)}/artifact/{E(f["rel"])}?download=1">descargar</a>'
+                f'</td></tr>')
+        cuerpo = ('<table><tr><th>Documento</th><th class="num">Tamaño</th>'
+                  '<th class="num">Generado</th><th class="num"></th></tr>'
+                  + "".join(filas) + "</table>")
+
+    guion = ""
+    g = dim.get("guion")
+    if g:
+        # Con qué se midió, junto a lo medido: un resultado sin su guion no se puede interpretar.
+        alcance = f' · <b>{g["n"]}</b> {E(g.get("unidad", ""))}' if g["n"] else ""
+        guion = (f'<div class="note">Se midió con <code>{E(g["rel"])}</code> '
+                 f'({E(g["estado"])}{alcance}). El guion es el techo de la cobertura: esta '
+                 f'herramienta no pudo encontrar nada fuera de lo que ese archivo ejercita.</div>')
+
+    return page(f"QA-harness · {name} · {dim['label']}", f"""{flash(msg)}
+<h1>{E(dim["label"])}</h1>
+<p class="sub">{E(dim["tool"])} · documentos tal como los dejó la herramienta ·
+<a href="/t/{E(name)}">volver a la tubería</a></p>
+{guion}
+{cuerpo}""", "home")

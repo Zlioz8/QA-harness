@@ -1,59 +1,85 @@
-# OWASP ZAP Automation Framework plan — antiplagio.
+# OWASP ZAP Automation Framework — antiplagio.
 #
-# Two contexts because this system has two front doors with different threat models:
+# AGNÓSTICO DE DESPLIEGUE. Antes fijaba `http://moodle:8080` y `http://api:8030`, que son los
+# nombres de servicio del compose LOCAL: apuntar el laboratorio al despliegue real del servidor 166
+# hacía que ZAP no resolviera nada y la dimensión DAST quedara sin correr. Ahora las dos puertas de
+# entrada llegan por variable, sustituidas por ZAP desde el entorno del contenedor:
 #
-#   moodle-plugin : what a browser reaches. Guarded by a Moodle session; ZAP crawls it
-#                   UNAUTHENTICATED, so it covers headers, the login surface and anything
-#                   reachable without a session. The authenticated authorization matrix is
-#                   Playwright's job (lib/specs/authz-matrix.spec.ts) — do not read a clean ZAP
-#                   report as "authorization is fine", it never logged in.
+#   ZAP_TARGET_URL  = APP_INTERNAL_URL del perfil  -> la API antiplagio
+#   ZAP_MOODLE_URL  = ZAP_MOODLE_URL del perfil    -> el Moodle que hospeda el plugin
 #
-#   antiplag-api  : what the plugin and the analyzers reach. No browser, no session — whoever
-#                   can route to it is inside its trust boundary. That is the interesting part:
-#                   the API's own code makes its shared-secret check optional when the secret is
-#                   unset (api_antiplagio/main.py:47).
+# Dos contextos porque el sistema tiene dos puertas con modelos de amenaza distintos:
+#
+#   moodle-plugin : lo que alcanza un navegador. Lo guarda una sesión de Moodle, y ZAP lo recorre
+#                   SIN AUTENTICAR: cubre cabeceras, la superficie de login y lo alcanzable sin
+#                   sesión. La matriz de autorización autenticada es trabajo de Playwright
+#                   (lib/specs/authz-matrix.spec.ts) — un informe de ZAP limpio NO dice que la
+#                   autorización esté bien, porque nunca inició sesión.
+#
+#   antiplag-api  : lo que alcanzan el plugin y los analizadores. Sin navegador y sin sesión:
+#                   quien pueda enrutar hasta ahí está dentro de su frontera de confianza.
+#
+# ⚠ INTEGRIDAD DEL BLANCO — por qué el escaneo activo está acotado a /health
+#
+#   De las tres operaciones que publica la API, DOS ESCRIBEN:
+#     POST /api/validate/info    valida datos de la actividad
+#     POST /api/process/status   graba el resultado final del análisis
+#   Un escaneo activo contra ellas envía cargas de inyección a endpoints que persisten en
+#   mdl_antiplagiarism_process. Contra un despliegue compartido eso corrompe registros reales de
+#   análisis: no es una prueba, es un incidente.
+#
+#   Así que se excluyen del escaneo activo. Eso es COBERTURA REDUCIDA y debe leerse como tal:
+#   la ausencia de hallazgos en esas dos rutas significa que NO SE MIRARON, no que estén sanas.
+#   Para cubrirlas hace falta un despliegue desechable (peldaño 3, `make up`), y entonces sí
+#   se quita este excludePaths.
 env:
   contexts:
     - name: moodle-plugin
       urls:
-        - "http://moodle:8080"
+        - "${ZAP_MOODLE_URL}"
       includePaths:
-        - "http://moodle:8080/local/antiplagiarsena.*"
-        - "http://moodle:8080/login.*"
+        - "${ZAP_MOODLE_URL}/local/antiplagiarsena.*"
+        - "${ZAP_MOODLE_URL}/login.*"
       excludePaths:
-        - ".*/login/logout.php.*"      # logging ourselves out mid-scan ends the scan
-        - ".*/admin/.*"                # site administration is out of scope for this audit
+        - ".*/login/logout.php.*"      # cerrar nuestra propia sesión termina el escaneo
+        - ".*/admin/.*"                # la administración del sitio queda fuera de alcance
     - name: antiplag-api
       urls:
-        - "http://api:8030"
+        - "${ZAP_TARGET_URL}"
       includePaths:
-        - "http://api:8030.*"
+        - "${ZAP_TARGET_URL}.*"
+      excludePaths:
+        # Las dos que ESCRIBEN. Se recorren y se analizan de forma pasiva; no se atacan.
+        - ".*/api/validate/info.*"
+        - ".*/api/process/status.*"
   parameters:
-    failOnError: false                 # the gate decides the verdict, not a tool's exit code
-    failOnWarning: false               # idem: a plan warning must not become a non-zero exit
+    failOnError: false                 # el veredicto lo da el gate, no el código de salida
+    failOnWarning: false               # ídem: un aviso del plan no debe volverse salida != 0
     progressToStdout: true
 
 jobs:
-  - type: spider
+  # El spec OpenAPI enumera las operaciones. Un spider sigue ENLACES, y una API JSON no tiene
+  # ninguno: sembrado sobre /health recorría exactamente una URL. Esto es la diferencia entre
+  # mirar una ruta y mirar las tres.
+  - type: openapi
     parameters:
-      context: moodle-plugin
-      url: "http://moodle:8080/local/antiplagiarsena/"
-      maxDuration: 3
+      apiUrl: "${ZAP_TARGET_URL}/openapi.json"
+      targetUrl: "${ZAP_TARGET_URL}"
+      context: antiplag-api
 
   - type: spider
     parameters:
-      context: antiplag-api
-      # A real route, not "/": this API has no root handler, and a spider seeded on a 404
-      # crawls nothing while reporting a plan warning.
-      url: "http://api:8030/health"
-      maxDuration: 2
+      context: moodle-plugin
+      url: "${ZAP_MOODLE_URL}/local/antiplagiarsena/"
+      maxDuration: 3
 
   - type: passiveScan-wait
     parameters:
       maxDuration: 5
 
-  # Active scanning probes for injection and misconfiguration on what the spider found.
-  # Kept off the Moodle context: an active scan against a CMS mostly rediscovers the CMS.
+  # El escaneo activo sondea inyección y mala configuración sobre lo descubierto. Se mantiene
+  # fuera del contexto de Moodle: un escaneo activo contra un CMS redescubre sobre todo el CMS.
+  # Y dentro de la API, el excludePaths del contexto deja fuera las dos rutas que escriben.
   - type: activeScan
     parameters:
       context: antiplag-api

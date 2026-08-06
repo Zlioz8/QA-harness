@@ -35,18 +35,30 @@ REQUIREMENTS = {
     "BASE_URL": "Sin esto no hay DAST, ni pruebas de autorización, ni carga.",
     "HEALTH_PATH": "Sin esto no se distingue «no hay hallazgos» de «no había nada corriendo».",
     "AUTH_ADAPTER": "Con «none» solo se cubre la superficie sin autenticar.",
-    "ROLE_A_USER": "La matriz de autorización necesita una cuenta de privilegio alto.",
-    "ROLE_B_USER": "Y una de privilegio bajo: sin ella no hay nada que intentar indebidamente.",
+    "ROLE_A_USER": "Cuenta REAL de privilegio alto, entregada por el operador QA. El laboratorio ya no siembra cuentas.",
+    "ROLE_B_USER": "Y una REAL de privilegio bajo: sin ella no hay nada que intentar indebidamente.",
 }
 
 KEY_RE = re.compile(r"^([A-Za-z_]\w*)=(.*)$")
 
 
 def _section_name(line: str) -> str | None:
-    """`# ---- source ------` -> "source". Done by stripping rather than by a regex with two
-    greedy dash runs around a lazy group, which backtracks badly on long separator lines."""
+    """`# ---- source ------` -> "source".
+
+    Exige guiones a AMBOS lados. Antes bastaba con que el comentario empezara por `--`, y eso
+    convertía en cabecera de sección cualquier línea de ayuda que citara una opción de línea de
+    comandos. Encontrado en cuanto la plantilla documentó el filtro de fuzzing:
+
+        #   --exclude-method PUT --exclude-method DELETE --exclude-path-regex create
+
+    pasó a ser una «sección» con ese nombre completo, y se tragó los TRECE campos siguientes:
+    en el formulario de la interfaz aparecían bajo un título absurdo, lejos de donde les toca.
+    Un archivo de configuración tiene que poder documentar banderas sin que el formulario se
+    reorganice solo. Se sigue sin usar regex: dos rachas de guiones codiciosas alrededor de un
+    grupo perezoso hacen backtracking pésimo en las líneas separadoras largas.
+    """
     body = line.lstrip("#").strip()
-    if not body.startswith("--"):
+    if not (body.startswith("--") and body.endswith("--")):
         return None
     name = body.strip("-").strip()
     return name or None
@@ -67,7 +79,32 @@ class Field:
         return bool(SECRET_RE.search(self.key))
 
     @property
+    def required(self) -> bool:
+        """Si el formulario debe marcarlo con un asterisco."""
+        return self.key in REQUIREMENTS
+
+    @property
+    def why_required(self) -> str:
+        """Qué se pierde sin este campo. Siempre disponible — es el texto del tooltip del
+        asterisco, que debe estar aunque la ayuda del perfil ya lo cuente en el cuerpo."""
+        return REQUIREMENTS.get(self.key, "")
+
+    @property
     def requirement(self) -> str:
+        """Qué se pierde si este campo queda vacío — SOLO si el perfil no lo dice ya.
+
+        REQUIREMENTS nació cuando target.env no explicaba nada: era el único sitio donde constaba
+        qué dimensión se caía por dejar un campo en blanco. Desde que la plantilla lo dice en su
+        propia ayuda ([OBLIGATORIO] / [DESBLOQUEA ...]), repetirlo aquí imprime la misma frase dos
+        veces seguidas bajo cada campo — visible en la pantalla de configuración.
+        Y peor que feo: son dos copias del mismo conocimiento, y la de aquí no la lee nadie al
+        editar el .env, así que es la que se queda atrás.
+
+        El contrato es el archivo. Este texto solo cubre el hueco de un perfil antiguo cuya
+        plantilla todavía no lo explicaba.
+        """
+        if self.help.strip():
+            return ""
         return REQUIREMENTS.get(self.key, "")
 
 

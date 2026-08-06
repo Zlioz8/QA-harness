@@ -25,8 +25,20 @@ SONAR_PORT=$(envget SONAR_PORT); APP_PORT=$(envget APP_PORT)
 FRONTEND_PORT=$(envget FRONTEND_PORT); PROD_PORT=$(envget PROD_PORT); MOODLE_PORT=$(envget MOODLE_PORT)
 
 [ -n "${SRC_PATH:-}" ] && [ -d "${SRC_PATH:-}" ] && ok "SRC_PATH: $SRC_PATH" || bad "SRC_PATH missing or not a directory: ${SRC_PATH:-<unset>}"
-[ -d "${SRC_PATH:-}/.git" ] && ok "git history present (secret scanning is meaningful)" \
-                            || warn "no .git in SRC_PATH — gitleaks/trufflehog will only see the working tree"
+# A project is not always one checkout. MOVIL is two repos under a parent that is not one, and a
+# check that only asked for `$SRC_PATH/.git` warned "no git history" about a fully versioned
+# project — sending the operator to fix something that was not broken. Same discovery rule as
+# tools/secrets.sh and tools/run-manifest.sh: the parent, or one level of children.
+if [ -d "${SRC_PATH:-}/.git" ]; then
+  ok "git history present (secret scanning is meaningful)"
+else
+  _repos=(); for _d in "${SRC_PATH:-.}"/*/; do [ -d "$_d.git" ] && _repos+=("$(basename "$_d")"); done
+  if [ "${#_repos[@]}" -gt 0 ]; then
+    ok "git history present in ${#_repos[@]} sub-repos: ${_repos[*]}"
+  else
+    warn "no .git in SRC_PATH nor in its subdirectories — gitleaks/trufflehog will only see the working tree"
+  fi
+fi
 
 # Two accounts of different privilege. Without them the authorization matrix is untestable,
 # and an audit that skips authorization is not an audit.
@@ -60,6 +72,50 @@ else
   echo "        SonarQube run is futile until the filesystem drops below 90%."
 fi
 
+# ---- memory ---------------------------------------------------------------------------------
+# Added after a run froze the operator's desktop for ~21 minutes (PSI full stall) and the kernel
+# OOM-killed VSCode and Chrome — not the tools. The lab's heavy dimensions are servers and JVMs
+# (SonarQube runs three processes, MobSF is a Django app with analysers, ZAP and Gradle are JVMs),
+# and they compete for RAM with whatever the operator is working in. Disk was checked here from
+# the start; memory was not, and memory is what actually stops the machine.
+MEM_AVAIL=$(awk '/MemAvailable/{printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null)
+MEM_TOTAL=$(awk '/MemTotal/{printf "%d", $2/1048576}' /proc/meminfo 2>/dev/null)
+if [ "${MEM_AVAIL:-0}" -ge 6 ]; then
+  ok "memory available: ${MEM_AVAIL}G of ${MEM_TOTAL}G"
+elif [ "${MEM_AVAIL:-0}" -ge 3 ]; then
+  warn "memory available: ${MEM_AVAIL}G of ${MEM_TOTAL}G — run the heavy dimensions ONE at a time"
+  echo "        (static, mobile-scan and dast each hold a server or a JVM; together they do not fit)"
+else
+  bad "memory available: ${MEM_AVAIL}G of ${MEM_TOTAL}G — not enough to run a dimension safely."
+  echo "        Below ~3G the machine thrashes and the OOM killer picks the biggest process, which"
+  echo "        is usually the editor or the browser, not the tool. Close something, or run"
+  echo "        'make down TARGET=<other>' on profiles you are not auditing right now."
+fi
+
+# Swap already in use is the better warning sign: it means the machine has been over its RAM for
+# a while. On a zram setup the compressed pages live in RAM, so heavy swap costs RAM *and* CPU.
+SWAP_USED=$(free -g 2>/dev/null | awk '/^Swap:/{print $3}')
+SWAP_TOTAL=$(free -g 2>/dev/null | awk '/^Swap:/{print $2}')
+if [ "${SWAP_TOTAL:-0}" -gt 0 ] && [ "${SWAP_USED:-0}" -ge $((SWAP_TOTAL / 2)) ]; then
+  warn "swap in use: ${SWAP_USED}G of ${SWAP_TOTAL}G — the host is already over its RAM budget"
+  [ -e /sys/block/zram0 ] && echo "        (zram: those pages sit compressed in RAM, so they cost memory and CPU both)"
+fi
+
+# ---- other profiles still running -------------------------------------------------------------
+# A dimension that finished can leave a server up (SonarQube, MobSF), and a session that ended
+# badly leaves containers running for days. Both are invisible until the machine runs out of
+# memory mid-audit, so name them here while there is still a choice.
+if command -v docker >/dev/null 2>&1; then
+  others=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -E '^seclab_' | grep -v "^seclab_${TARGET}-" | tr '\n' ' ')
+  [ -n "${others// }" ] && warn "lab containers of OTHER profiles are up: ${others}— 'make down TARGET=<profile>' frees their memory"
+  # Long-lived tool containers with no compose project: typically a script that ran outside the
+  # Makefile and whose session is gone. Three of these (Playwright, two days old) were behind the
+  # freeze that motivated this check.
+  strays=$(docker ps --format '{{.Names}}\t{{.Image}}\t{{.RunningFor}}' 2>/dev/null \
+    | grep -E 'playwright|zap|k6|mobsf|semgrep|trivy' | grep -vE '^seclab_' | grep -E 'days|day' | cut -f1 | tr '\n' ' ')
+  [ -n "${strays// }" ] && warn "tool containers running for days outside any profile: ${strays}— likely orphans from a finished session"
+fi
+
 # Ports, bound to loopback only (lab finding L1).
 #
 # Two listeners, two ways of seeing them. `ss` reports this namespace's sockets: right on the
@@ -88,6 +144,49 @@ for p in ${SONAR_PORT:-9000} ${APP_PORT:-} ${FRONTEND_PORT:-} ${PROD_PORT:-} ${M
 done
 if ss -ltn 2>/dev/null | grep -qE '0\.0\.0\.0:(9000|8000|8099|8100|5173)'; then
   bad "a lab port is listening on 0.0.0.0 — the lab may hold real data (finding L1)"
+fi
+
+# ---- archivos de configuración del perfil que docker convertirá en DIRECTORIOS ---------------
+# docker-compose monta estos cuatro archivos uno a uno desde targets/<t>/. Cuando el origen de un
+# bind mount NO EXISTE, el demonio de Docker no falla: CREA UN DIRECTORIO VACÍO en su lugar y lo
+# monta. La herramienta recibe entonces un directorio donde esperaba un archivo.
+#
+# Medido: targets/antiplagio/ no traía spectral.yaml. Docker creó el directorio (root:root), lo
+# montó en /spectral.yaml, y Spectral murió con
+#     Error #1: EISDIR: illegal operation on a directory, read
+# un mensaje que no nombra ni el archivo ni la variable ni el perfil. La dimensión del contrato de
+# API se reportaba como "NO EJECUTADA" y nadie sabía por qué. El directorio además queda en el
+# perfil, así que el siguiente intento falla igual.
+for _f in sonar-project.properties qodana.yaml gitleaks.toml spectral.yaml; do
+  _p="targets/$TARGET/$_f"
+  if [ -d "$_p" ]; then
+    bad "$_p es un DIRECTORIO — lo creó docker al no encontrar el archivo"
+    echo "        La herramienta que lo monte morirá con un error que no nombra este archivo."
+    echo "        Arréglalo:  rmdir '$_p' && cp targets/_template/$_f '$_p'"
+  elif [ ! -f "$_p" ]; then
+    warn "falta $_p — docker creará un DIRECTORIO en su lugar en la próxima corrida"
+    echo "        Cópialo antes:  cp targets/_template/$_f '$_p'"
+  fi
+done
+
+# ---- umbrales del gate que el perfil NO declara ----------------------------------------------
+# Una clave de umbral ausente NO desactiva la comprobación: tools/gate.sh aplica un defecto
+# interno y estampa un veredicto con él. Medido antes de escribir esto: de las nueve claves que
+# el gate consulta, CINCO no existían ni en la plantilla, así que ningún perfil las declaraba —
+# MAX_QUALITY_FINDINGS=500 se aplicaba en tres proyectos sin que nadie hubiera elegido ese 500.
+# Un presupuesto que nadie decidió no se puede leer como un presupuesto aceptado.
+_missing=""
+while IFS=$'\t' read -r _key _def; do
+  [ -z "$_key" ] && continue
+  grep -q "^${_key}=" "$ENVFILE" 2>/dev/null || _missing="$_missing $_key(=$_def)"
+done < <(tools/dimensions.py --list gate,default 2>/dev/null | grep -v '^	' | sort -u)
+if [ -n "${_missing// }" ]; then
+  warn "umbrales que el gate usará con un defecto NO declarado en el perfil:"
+  for _m in $_missing; do echo "          $_m"; done
+  echo "        Decláralos en $ENVFILE aunque sea con ese mismo valor: así el número"
+  echo "        que juzga el proyecto es uno que alguien eligió."
+else
+  ok "todos los umbrales del gate están declarados en el perfil"
 fi
 
 # Inline comments: the one place where this lab's own tools disagree with each other.

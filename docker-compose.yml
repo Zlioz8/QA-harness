@@ -41,6 +41,12 @@ services:
   # ---------- static: repo-shaped. Runs on ANY project with zero knowledge of it ----------
   sonarqube:
     profiles: ["static"]
+    # Techo de memoria del registro (lib/dimensions.yml). Hasta ahora SOLO lo tenia ZAP, puesto
+    # tras un pico medido de 7,59 GiB que congelo el escritorio 21 minutos y provoco un OOM del
+    # kernel sobre el editor. El limite del cgroup es lo unico autoritativo porque NO depende de
+    # que la JVM este de acuerdo: pasado el techo muere el contenedor y la maquina sigue usable.
+    # Una dimension que fallo en voz alta vale mas que una que se llevo el escritorio por delante.
+    mem_limit: 3g
     image: sonarqube:community
     environment:
       SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
@@ -115,6 +121,12 @@ services:
   # Linter image is chosen per target (qodana-php / qodana-python / qodana-js).
   qodana:
     profiles: ["static"]
+    # Techo de memoria del registro (lib/dimensions.yml). Hasta ahora SOLO lo tenia ZAP, puesto
+    # tras un pico medido de 7,59 GiB que congelo el escritorio 21 minutos y provoco un OOM del
+    # kernel sobre el editor. El limite del cgroup es lo unico autoritativo porque NO depende de
+    # que la JVM este de acuerdo: pasado el techo muere el contenedor y la maquina sigue usable.
+    # Una dimension que fallo en voz alta vale mas que una que se llevo el escritorio por delante.
+    mem_limit: 3g
     image: ${QODANA_IMAGE:-jetbrains/qodana-php:latest}
     environment:
       QODANA_TOKEN: ${QODANA_TOKEN:-}
@@ -231,6 +243,14 @@ services:
   zap:
     profiles: ["dast"]
     image: zaproxy/zap-stable:latest
+    # HARD ceiling, measured: with the `openapi` job importing 97 operations, an active scan took
+    # 7.59 GiB on a 15 GiB host — swap hit 100%, the desktop froze and the kernel OOM-killed the
+    # operator's editor. `JAVA_TOOL_OPTIONS=-Xmx…` does NOT contain it: zap.sh computes its own
+    # heap from host RAM and passes -Xmx explicitly on the java command line, and an explicit flag
+    # beats the env var. Only the cgroup limit is authoritative, because it does not depend on the
+    # JVM agreeing to it: past 2g the container dies and the machine stays usable — a dimension
+    # that failed loudly is worth more than one that took the desktop down with it.
+    mem_limit: 2g
     # Reaching an application the lab did NOT bring up (the common case: the team already
     # deploys it themselves). Inside this network, "localhost" is the tool's own container —
     # so a host deployment is addressed as host.docker.internal, which on Linux only resolves
@@ -248,11 +268,55 @@ services:
         required: false
     environment:
       ZAP_TARGET_URL: ${APP_INTERNAL_URL:-}
+      # La segunda puerta del sistema. Un plan con UNA sola URL obliga a fijar la otra a mano en el
+      # propio plan, que es como el de antiplagio acabo clavando `moodle:8080` y dejo de funcionar
+      # en cuanto el laboratorio apunto a un despliegue externo.
+      ZAP_MOODLE_URL: ${ZAP_MOODLE_URL:-${BASE_URL:-}}
+      # Under the cgroup ceiling on purpose, so the JVM raises OutOfMemoryError — visible in ZAP's
+      # own log — instead of being SIGKILLed by the kernel, which leaves no explanation anywhere.
+      JAVA_TOOL_OPTIONS: -Xmx1536m
     volumes:
       - ./targets/${TARGET_NAME}/zap:/zap/wrk/zap:ro
+      # The rest of the profile, read-only: an `openapi` job needs the spec file, and on a
+      # JSON API that is the difference between crawling two GET routes and reaching every
+      # documented operation. Same file api-lint and api-fuzz consume, mounted once more here.
+      - ./targets/${TARGET_NAME}:/zap/wrk/profile:ro
       - ./reports/${TARGET_NAME}/zap:/zap/wrk/reports
     command: >
       zap.sh -cmd -autorun /zap/wrk/zap/automation.yaml
+
+  # ---------- mobile ----------
+  # The dimension every other tool in this lab structurally misses. On a hybrid mobile project the
+  # deliverable is not the repository, it is the signed binary: the bundle that actually ships
+  # carries the compiled config, the assets, the third-party SDKs and whatever secret got baked in
+  # on build day. Auditing only the source answers "what did we write", never "what did we hand
+  # out". MobSF opens the artifact itself.
+  #
+  # It is a SERVER (like SonarQube), driven over its REST API by tools/mobile-scan.sh: upload,
+  # scan, pull the JSON report. Same invariant as every other published port here — the host side
+  # is the literal 127.0.0.1. MOBSF_API_KEY is pinned so the script does not have to scrape the
+  # key out of the container log on every run.
+  mobsf:
+    profiles: ["mobile"]
+    # Techo de memoria del registro (lib/dimensions.yml). Hasta ahora SOLO lo tenia ZAP, puesto
+    # tras un pico medido de 7,59 GiB que congelo el escritorio 21 minutos y provoco un OOM del
+    # kernel sobre el editor. El limite del cgroup es lo unico autoritativo porque NO depende de
+    # que la JVM este de acuerdo: pasado el techo muere el contenedor y la maquina sigue usable.
+    # Una dimension que fallo en voz alta vale mas que una que se llevo el escritorio por delante.
+    mem_limit: 3g
+    image: opensecurity/mobile-security-framework-mobsf:latest
+    environment:
+      MOBSF_API_KEY: ${MOBSF_API_KEY:-seclab-local-only-key}
+    ports:
+      - "127.0.0.1:${MOBSF_PORT:-8010}:8000"
+    volumes:
+      - ${SRC_PATH}:/src:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/v1/scans -H \"Authorization: ${MOBSF_API_KEY:-seclab-local-only-key}\" >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
 
   # ---------- perf ----------
   # Generator runs unconstrained on purpose: it must not compete for CPU with the
@@ -297,6 +361,16 @@ services:
     # El script de carga lo elige el target (K6_SCRIPT). `smoke.js` es el defecto portable: un
     # humo de un VU. La prueba real de saturación es otra (p.ej. usuarios_load.js) y se declara
     # en target.env sin tocar el core.
+    # DEPRECADO EN k6: `--summary-export` está marcado obsoleto desde k6 v0.52 en favor de
+    # `handleSummary()` dentro del script. Con `image: grafana/k6:latest` —sin fijar— esto se
+    # rompe solo el día que la etiqueta avance lo suficiente, y el fallo será "no existe
+    # summary.json", que tools/gate.sh leerá como `skip` = NO EJECUTADO. Es decir: una dimensión
+    # de carga que deja de medirse sin que nadie lo note.
+    #
+    # No se cambia aquí porque migrar exige escribir `handleSummary()` en lib/k6/ y en los
+    # scripts de cada perfil, produciendo un summary.json con la MISMA forma que gate.sh ya
+    # parsea (metrics.http_req_duration."p(95)" y metrics.http_req_failed.value). Es un cambio
+    # con verificación propia, no una edición al vuelo.
     command: ["run", "--summary-export=/reports/summary.json", "/scripts/${K6_SCRIPT:-smoke.js}"]
 
   # ---------- API contract (OpenAPI / Swagger) ----------
@@ -307,15 +381,32 @@ services:
   #
   # spectral: is the DESCRIPTION itself sound — operations without security, bodies without a
   # schema, responses that were never documented. Static: needs no running app.
+  # OPENAPI_SPEC is a path AS THE TOOL SEES IT, and there are two legitimate homes for a spec:
+  #   /src/...      the description is committed in the audited repository (the happy case)
+  #   /profile/...  the project publishes none, so the profile carries one — typically dumped
+  #                 from the framework (FastAPI's app.openapi()) because the deployment keeps
+  #                 /openapi.json disabled. A generated spec is still the API's own contract,
+  #                 but it describes the CODE, not the deployment: say so in RUN.md.
   api-lint:
     profiles: ["static"]
     image: stoplight/spectral:latest
     volumes:
       - ${SRC_PATH}:/src:ro
+      - ./targets/${TARGET_NAME}:/profile:ro
       - ./targets/${TARGET_NAME}/spectral.yaml:/spectral.yaml:ro
       - ./reports/${TARGET_NAME}/api:/reports
+    # Spectral acepta una RUTA o una URL, y la cascada respeta ese orden:
+    #   OPENAPI_SPEC      el documento vive en el repositorio auditado (el caso bueno)
+    #   OPENAPI_SPEC_URL  no está en el repo, pero el despliegue lo publica
+    #
+    # La cascada la resuelve el MAKEFILE, no este archivo: `docker compose` NO interpola
+    # sustituciones anidadas (`${A:-${B}}` no cae a B, se queda en la cadena literal). Intentarlo
+    # aquí dejaba a Spectral leyendo `/src`, un directorio, y muriendo con
+    # `EISDIR: illegal operation on a directory` — un error que no nombra ni la variable ni el
+    # archivo. Encontrado apuntando el laboratorio al 166, cuyo FastAPI publica /openapi.json
+    # pero no lo commitea.
     command: >
-      lint /src/${OPENAPI_SPEC:-openapi.json}
+      lint ${OPENAPI_SPEC:-/src/openapi.json}
       --ruleset /spectral.yaml
       --format sarif --output /reports/spectral.sarif
       --fail-severity error
@@ -325,6 +416,14 @@ services:
   # response that violates the documented schema, and any endpoint that answers without the auth
   # it declares. That last one is the closest thing to an authorization test that can be
   # automated, because here the expected behaviour was written down by the API's own authors.
+  #
+  # API_FUZZ_FILTERS is not decoration. Fuzzing derives cases from EVERY operation in the spec,
+  # including the ones that write: a proxy in front of someone else's LMS publishes
+  # `/blog/create`, `/assignments/submit`, `DELETE /notifications/{id}` — and a fuzz run against
+  # a shared deployment then authors blog posts and deletes notifications for real. Same rule as
+  # the authorization matrix: writes only against disposable targets. Declare the exclusions in
+  # the profile, e.g. `--exclude-method PUT --exclude-method DELETE --exclude-path-regex create`,
+  # and record in RUN.md which operations were left unfuzzed — that is reduced coverage, not a pass.
   api-fuzz:
     profiles: ["api"]
     image: schemathesis/schemathesis:stable
@@ -338,11 +437,13 @@ services:
         required: false
     volumes:
       - ${SRC_PATH}:/src:ro
+      - ./targets/${TARGET_NAME}:/profile:ro
       - ./reports/${TARGET_NAME}/api:/reports
     command: >
-      run ${OPENAPI_SPEC_URL:-/src/${OPENAPI_SPEC:-openapi.json}}
+      run ${OPENAPI_SPEC_URL:-${OPENAPI_SPEC:-/src/openapi.json}}
       --url ${APP_INTERNAL_URL:-}
       --checks all
+      ${API_FUZZ_FILTERS:-}
       --max-examples ${API_FUZZ_EXAMPLES:-50}
       --report junit --report-junit-path /reports/schemathesis.xml
 
@@ -394,6 +495,13 @@ services:
   # (business logic). The auth adapter is what makes the generic ones portable.
   playwright:
     profiles: ["e2e"]
+    # Techo de memoria derivado de lib/dimensions.yml. Hasta ahora SOLO lo tenia ZAP, puesto a
+    # posteriori tras un pico de 7,59 GiB que congelo el escritorio 21 minutos y provoco un OOM
+    # del kernel sobre el editor del operador. El mismo razonamiento aplica identico aqui: el
+    # limite del cgroup es lo unico autoritativo porque NO depende de que la JVM este de acuerdo
+    # —pasado el techo muere el contenedor y la maquina sigue usable—. Una dimension que fallo
+    # en voz alta vale mas que una que se llevo el escritorio por delante.
+    mem_limit: 4g
     image: mcr.microsoft.com/playwright:v1.49.0-jammy
     network_mode: host
     # The whole target profile is handed to the specs, so a project can read its own variables

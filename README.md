@@ -22,8 +22,13 @@ silencio por encima) y ~8 GB para imágenes de herramientas. `make doctor` lo co
 SECURITY-LAB/
   docker-compose.yml     núcleo: SÓLO herramientas. Ningún nombre de proyecto aparece aquí.
   Makefile               objetivos; TARGET=<perfil> elige el proyecto
+  lib/dimensions.yml     EL REGISTRO: qué dimensiones existen, qué artefacto deja cada una,
+                         qué umbral la juzga, qué cuesta y dónde puede ejecutarse. Lo leen el
+                         gate, el manifiesto, el informe, las dos pantallas de la UI y esta
+                         misma documentación — una sola lista, no siete copias.
   tools/                 new · detect · doctor · tier · require-live · secrets · gate ·
-                         run-manifest · status · dashboard · triage · conversores a SARIF
+                         run-manifest · status · dashboard · triage · doc-check ·
+                         run-dimension (única indirección de ejecución) · conversores a SARIF
   ui/                    la interfaz web local (make ui) — FastAPI, un solo operador
   recipes/               bloques de arranque reutilizables (postgres, moodle-plugin,
                          moodle-baseline, fastapi-uvicorn, kafka-zk)
@@ -169,23 +174,31 @@ Tres decisiones deliberadas de esa página:
 
 ## Dimensiones y herramientas
 
-| Dimensión | Herramienta | Objetivo | Necesita runtime |
-|---|---|---|---|
-| Secretos en toda la historia git | gitleaks + trufflehog | `make secrets` | no |
-| CVE de dependencias | Trivy (fs) | `make deps` | no |
-| Configuración de contenedores | Trivy (config) | `make config-scan` | no |
-| CVE de imágenes | Trivy (image) | `make image-scan IMAGE=...` | no |
-| Inventario de componentes | Syft | `make sbom` | no |
-| SAST poliglota con taint | semgrep | `make semgrep` | no |
-| Calidad / mantenibilidad | SonarQube + Qodana | `make sonar` / `make qodana` | no |
-| Contrato de API (la descripción OpenAPI) | Spectral | `make api-lint` | no |
-| Build de producción del proyecto | el del propio perfil | `make build` | no |
-| Superficie runtime | OWASP ZAP | `make dast` | **sí** |
-| Autorización y flujos | Playwright | `make e2e` | **sí** |
-| Carga | k6 | `make perf` | **sí** |
-| Carga con un plan .jmx propio | JMeter | `make perf-jmeter` | **sí** |
-| La API contra su propio contrato | Schemathesis | `make api-fuzz` | **sí** |
-| Presupuesto del hilo principal | Playwright + CDP | `make budget` | **sí** |
+<!-- dimensiones:inicio -->
+
+_Tabla generada de `lib/dimensions.yml` con `tools/dimensions.py --markdown`. No la edites a mano: `make doc-check` falla si diverge del registro._
+
+| Dimensión | Herramienta | Comando | Artefacto | Runtime |
+|---|---|---|---|---|
+| Secretos en la historia git | gitleaks | `make secrets` | `gitleaks.sarif` | no |
+| Secretos verificados en vivo | TruffleHog | `make secrets` | `trufflehog.sarif` | no |
+| Dependencias / CVE | Trivy fs | `make deps` | `trivy/trivy-fs.sarif` | no |
+| Configuración de contenedores | Trivy config | `make config-scan` | `trivy/trivy-config.sarif` | no |
+| CVE de imágenes | Trivy image | `make image-scan` | `trivy/trivy-image.sarif` | no |
+| Inventario de componentes (SBOM) | Syft | `make sbom` | `sbom/sbom.spdx.json` | no |
+| SAST | semgrep | `make semgrep` | `semgrep/semgrep.sarif` | no |
+| Calidad (SonarQube) | SonarQube | `make sonar` | `sonar/sonar.sarif` | no |
+| Calidad (Qodana) | Qodana | `make qodana` | `qodana/qodana.sarif` | no |
+| Artefacto móvil (APK/IPA) | MobSF | `make mobile-scan` | `mobile/mobsf.sarif` | no |
+| Contrato de API (Spectral) | Spectral | `make api-lint` | `api/spectral.sarif` | no |
+| Contrato vs implementación (Schemathesis) | Schemathesis | `make api-fuzz` | `api/schemathesis.xml` | **sí** |
+| Superficie runtime (DAST) | OWASP ZAP | `make dast` | `zap/zap.sarif` · `zap/zap-report.html` | **sí** |
+| Autorización y flujos (E2E) | Playwright | `make e2e` | `playwright/results.json` | **sí** |
+| Carga (k6) | k6 | `make perf` | `k6/summary.json` | **sí** |
+| Carga (JMeter) | JMeter | `make perf-jmeter` | `jmeter/results.jtl` | **sí** |
+| Jornadas en dispositivo real (adb) | adb | `make device-e2e` | `device/jornadas.md` | **sí** |
+
+<!-- dimensiones:fin -->
 
 `make static` = `secrets deps config-scan sbom semgrep qodana sonar`, y `make live` = `dast perf
 e2e`: los dos agregados cubren lo habitual, no *todo* lo etiquetado. Las dimensiones que dependen

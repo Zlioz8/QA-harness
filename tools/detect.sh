@@ -61,6 +61,37 @@ done < <(scan -type f -name version.php)
 
 [ -n "$(scan -type f -name 'vite.config.*' | head -1)" ] && {
   RECIPES+=(vite-spa); add_note "Vite SPA detected — 'make build' is meaningful for this target."; }
+
+# --- hybrid mobile (Ionic / Capacitor / Cordova) ---------------------------------------------
+# Worth its own branch because it changes WHAT the audited object is. Everything else in this
+# script describes something that runs on a server; a mobile project ships a signed bundle to
+# other people's devices, and the bundle is not the repository — it carries compiled config,
+# assets and third-party SDKs no source scan sees. A profile that does not declare
+# MOBILE_ARTIFACT simply never audits the thing the project delivers.
+CAPCFG=$(scan -type f -name 'capacitor.config.*' | head -1)
+if [ -n "$CAPCFG" ] || [ -n "$(scan -type f -name 'ionic.config.json' | head -1)" ]; then
+  RECIPES+=(capacitor-android)
+  add_note "Hybrid mobile app (Ionic/Capacitor). Set MOBILE_ARTIFACT to the RELEASE bundle and run 'make mobile-scan'; add --config=/seclab-lib/semgrep/capacitor-android.yml to SEMGREP_CONFIG so the Android config is audited too."
+  add_note "Its UI runs in a WebView, not a desktop browser: 'make budget' measures a browser this app never uses. The device dimension ('make device-e2e') is what covers real usage."
+
+  # Red flags that are already findings — same treatment as a compose publishing on 0.0.0.0.
+  # Comments are stripped first, and the wildcard must be an entry of its own ('*'), not the
+  # `*.example.com` of a legitimate subdomain rule. Without both, the note fires on the comment
+  # that explains why the wildcard was REMOVED — a warning that trains people to ignore warnings.
+  if [ -n "$CAPCFG" ] && grep -qE "allowNavigation" "$CAPCFG" 2>/dev/null \
+     && sed 's://.*::' "$CAPCFG" | grep -qE "(^|[[:space:],\[])['\"]\*['\"]" 2>/dev/null; then
+    add_note "WARNING: capacitor allowNavigation contains '*' — the WebView, with its tokens and native bridge, may load any origin."
+  fi
+  NSC=$(scan -type f -name 'network_security_config.xml' | head -1)
+  if [ -n "$NSC" ] && grep -q 'src="user"' "$NSC" 2>/dev/null; then
+    add_note "WARNING: network_security_config trusts user-installed CAs. Inside <debug-overrides> that is fine; inside <domain-config> it ships to production and enables MITM."
+  fi
+  MAN=$(scan -type f -name 'AndroidManifest.xml' | head -1)
+  [ -n "$MAN" ] && grep -q 'android:usesCleartextTraffic="true"' "$MAN" 2>/dev/null && \
+    add_note "WARNING: manifest allows cleartext traffic app-wide."
+  APK=$(scan -type f -name '*.apk' | head -1)
+  [ -n "$APK" ] && echo "  candidate artifact: ${APK#"$SRC"/}"
+fi
 [ -n "$(scan -type f -name go.mod | head -1)" ] && RECIPES+=(go-binary)
 
 # --- services the project already declares: reuse, do not reinvent ---

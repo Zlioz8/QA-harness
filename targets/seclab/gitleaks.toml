@@ -1,0 +1,17 @@
+# gitleaks config — EXTEND the default ruleset, never replace it.
+# The defaults already catch generic API keys, AWS credentials, private keys, JWTs.
+[extend]
+useDefault = true
+
+# Generic: any password/secret/token assigned in a committed env-style file. Broad on
+# purpose — a false positive costs a glance, a missed credential costs a rotation.
+[[rules]]
+id = "env-assigned-secret"
+description = "Password/secret/token assigned in a committed file"
+regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY)\s*=\s*\S{4,}'''
+tags = ["generic", "env"]
+
+# Add project-specific rules below (framework keys, internal token formats). Example:
+# [[rules]]
+# id = "laravel-app-key"
+# regex = '''APP_KEY\s*=\s*base64:[A-Za-z0-9+/=]{40,}'''

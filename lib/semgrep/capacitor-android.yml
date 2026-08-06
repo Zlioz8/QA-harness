@@ -1,0 +1,219 @@
+# Lab-owned rules for hybrid mobile apps (Ionic / Capacitor on Android).
+#
+# Why these exist: every public ruleset in this lab reads SOURCE. A Capacitor app ships its real
+# attack surface in CONFIGURATION — the network security config decides which CAs are trusted,
+# capacitor.config.ts decides where the WebView may navigate, the manifest decides what the app
+# may reach on the device, and build.gradle decides whether the shipped binary is debuggable.
+# None of that is Python or TypeScript logic, so semgrep's language rules never look at it and
+# the dimension reads "clean" while the interesting decisions go unaudited.
+#
+# Scope note: these describe RELEASE risk. A debug build is allowed to trust user CAs and talk
+# cleartext — that is what `<debug-overrides>` is for. The rules below flag the same permissions
+# when they live where release inherits them.
+rules:
+  # ---- network security config -------------------------------------------------------------
+  - id: capacitor-nsc-user-ca-trusted-in-release
+    languages: [generic]
+    severity: ERROR
+    paths:
+      include: ["*network_security_config*.xml"]
+    patterns:
+      - pattern-inside: |
+          <domain-config ...>
+          ...
+          </domain-config>
+      - pattern: <certificates src="user"/>
+    message: >-
+      This domain trusts USER-INSTALLED CAs, and a <domain-config> applies to release builds too —
+      only <debug-overrides> is debug-only. Anyone who can get a certificate into the device's user
+      store (a work profile, a "install this to browse" prompt, a shared laptop) can then read and
+      rewrite this app's traffic to this domain. Move the user anchor into <debug-overrides>, and
+      if the domain needs a private CA in production, pin that CA specifically instead.
+    metadata:
+      category: security
+      technology: [android, capacitor]
+      confidence: HIGH
+
+  - id: capacitor-nsc-cleartext-permitted
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["*network_security_config*.xml"]
+    pattern: cleartextTrafficPermitted="true"
+    message: >-
+      Cleartext HTTP allowed for this scope. On a per-domain block this survives into release: the
+      app will happily speak plaintext to that host, so a network attacker does not even need a
+      certificate. Keep it inside <debug-overrides>, or drop the host once it serves TLS.
+    metadata:
+      category: security
+      technology: [android]
+
+  - id: capacitor-nsc-development-tunnel-domain
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["*network_security_config*.xml"]
+    pattern-either:
+      - pattern: <domain includeSubdomains="...">$X.trycloudflare.com</domain>
+      - pattern: <domain includeSubdomains="...">trycloudflare.com</domain>
+      - pattern: <domain includeSubdomains="...">$X.ts.net</domain>
+      - pattern: <domain includeSubdomains="...">$X.ngrok.io</domain>
+    message: >-
+      A development tunnel domain is declared in the shipped network config. Tunnel hostnames are
+      handed out to whoever asks: the exception you wrote for your own tunnel also covers the next
+      person's. Remove before release — the tunnel it was written for is long gone anyway.
+    metadata:
+      category: security
+      technology: [android]
+
+  # ---- capacitor runtime config ------------------------------------------------------------
+  - id: capacitor-webview-navigation-wildcard
+    languages: [generic]
+    severity: ERROR
+    paths:
+      include: ["capacitor.config.*"]
+    pattern-either:
+      - pattern: "allowNavigation:$X'*'$Y"
+      - pattern: 'allowNavigation:$X"*"$Y'
+    message: >-
+      allowNavigation contains '*': the WebView may navigate anywhere. The app's own JavaScript
+      context — with its tokens and its Capacitor bridge — then loads on any origin an attacker can
+      get the user to open. List the hosts explicitly.
+    metadata:
+      category: security
+      technology: [capacitor]
+
+  - id: capacitor-cleartext-enabled
+    languages: [generic]
+    severity: ERROR
+    paths:
+      include: ["capacitor.config.*"]
+    pattern: "cleartext: true"
+    message: >-
+      Capacitor is configured to serve/accept cleartext. Combined with a permissive network config
+      this is plaintext traffic on the user's network, from an app that also holds their session.
+    metadata:
+      category: security
+      technology: [capacitor]
+
+  - id: capacitor-allow-mixed-content
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["capacitor.config.*"]
+    pattern: "allowMixedContent: true"
+    message: >-
+      Mixed content enabled: an https page in this WebView may pull scripts over http, which is an
+      injection point into an authenticated page.
+    metadata:
+      category: security
+      technology: [capacitor]
+
+  - id: capacitor-webview-remote-debugging
+    languages: [generic]
+    severity: ERROR
+    paths:
+      include: ["capacitor.config.*", "*.java", "*.kt"]
+    pattern-either:
+      - pattern: "webContentsDebuggingEnabled: true"
+      - pattern: WebView.setWebContentsDebuggingEnabled(true)
+    message: >-
+      WebView remote debugging is on. On a distributable build, anyone with USB access can attach
+      chrome://inspect and read the DOM, the JS runtime and every token the app holds.
+    metadata:
+      category: security
+      technology: [android, capacitor]
+
+  # ---- android manifest ---------------------------------------------------------------------
+  - id: android-manifest-debuggable
+    languages: [generic]
+    severity: ERROR
+    paths:
+      include: ["AndroidManifest.xml"]
+    pattern: android:debuggable="true"
+    message: >-
+      android:debuggable="true" in the manifest. It enables run-as, attaching a debugger and
+      reading the app's private storage on any device — not just yours.
+    metadata:
+      category: security
+      technology: [android]
+
+  - id: android-manifest-allow-backup
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["AndroidManifest.xml"]
+    pattern: android:allowBackup="true"
+    message: >-
+      allowBackup="true" lets `adb backup` pull the app's private data — tokens and cached session
+      included — off a device with USB debugging on.
+    metadata:
+      category: security
+      technology: [android]
+
+  - id: android-manifest-cleartext-traffic
+    languages: [generic]
+    severity: ERROR
+    paths:
+      include: ["AndroidManifest.xml"]
+    pattern: android:usesCleartextTraffic="true"
+    message: >-
+      The application-wide cleartext switch is on, which overrides the careful per-domain work in
+      the network security config for everything not explicitly covered there.
+    metadata:
+      category: security
+      technology: [android]
+
+  - id: android-manifest-broad-permission
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["AndroidManifest.xml"]
+    pattern-either:
+      - pattern: <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+      - pattern: <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+      - pattern: <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+      - pattern: <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    message: >-
+      Broad permission requested. Each one widens what a compromise of this app reaches: overlay
+      windows can phish other apps, shared storage is world-readable to other apps on older APIs.
+      Keep only the ones a current feature needs, and prefer scoped storage / SAF.
+    metadata:
+      category: security
+      technology: [android]
+
+  - id: android-exported-component-no-permission
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["AndroidManifest.xml"]
+    pattern-either:
+      - pattern: <provider $...ATTRS android:exported="true"
+      - pattern: <service $...ATTRS android:exported="true"
+      - pattern: <receiver $...ATTRS android:exported="true"
+    message: >-
+      Exported component: any other app on the device can invoke it. If it is not an entry point on
+      purpose, set exported="false"; if it is, guard it with a signature-level permission.
+      (A launcher activity is legitimately exported — this rule deliberately leaves activities out.)
+    metadata:
+      category: security
+      technology: [android]
+
+  # ---- gradle -------------------------------------------------------------------------------
+  - id: android-release-not-minified
+    languages: [generic]
+    severity: WARNING
+    paths:
+      include: ["build.gradle", "build.gradle.kts"]
+    patterns:
+      - pattern-inside: |
+          release {
+          ...
+          }
+      - pattern: minifyEnabled false
+    message: >-
+      Release build ships unminified and unshrunk. Class and method names survive intact, so
+      reversing the bundle to find endpoints, keys and auth flow is a `jadx` away.
+    metadata:
+      category: security
+      technology: [android]

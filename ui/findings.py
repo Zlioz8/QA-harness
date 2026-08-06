@@ -23,21 +23,21 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.environ.get("LAB_DIR", os.getcwd()), "tools"))
-import dashboard  # noqa: E402  — the one SARIF parser; a second would drift from the report
+import dimensions  # noqa: E402 — el registro único; esta lista estaba escrita en seis sitios
+import sarif       # noqa: E402 — el único parser; un segundo derivaría del informe
 import triage as triagelib  # noqa: E402
 
-# (id, label, path relative to the target's report dir). Order is the reading order on screen.
-SOURCES = [
-    ("gitleaks",     "Secretos en la historia git",     "gitleaks.sarif"),
-    ("trivy-fs",     "Dependencias / CVE",              "trivy/trivy-fs.sarif"),
-    ("trivy-config", "Configuración de contenedores",   "trivy/trivy-config.sarif"),
-    ("trivy-image",  "CVE de imágenes",                 "trivy/trivy-image.sarif"),
-    ("semgrep",      "SAST",                            "semgrep/semgrep.sarif"),
-    ("sonar",        "Calidad (SonarQube)",             "sonar/sonar.sarif"),
-    ("qodana",       "Calidad (Qodana)",                "qodana/qodana.sarif"),
-    ("api-lint",     "Contrato de API (Spectral)",      "api/spectral.sarif"),
-    ("zap",          "Superficie runtime (DAST)",       "zap/zap.sarif"),
-]
+# La lista ya no vive aquí. Vivía aquí Y en ui/app.py Y en tools/dashboard.py Y en
+# tools/run-manifest.sh Y en tools/gate.sh Y en el Makefile, y ya había derivado: este módulo
+# leía `zap/zap.sarif` mientras ui/app.py leía `zap/zap-report.json`. En el perfil
+# anuncios_de_plataforma ese segundo archivo es formato ZAP crudo (clave "site", sin "runs"),
+# así que load_sarif devolvía None y la pantalla de triaje se comía la dimensión ZAP ENTERA sin
+# decir nada — mientras esta pantalla sí la mostraba. Dos pantallas, dos verdades.
+#
+# `triage: true` en lib/dimensions.yml es lo que decide qué se puede juzgar, y ahora lo deciden
+# las dos pantallas leyendo el mismo campo.
+SOURCES = [(d.id, d.label, d.artifact)
+           for d in dimensions.load() if d.kind == "findings" and d.triage]
 
 TOOL_LABEL = {tid: label for tid, label, _ in SOURCES}
 
@@ -82,7 +82,7 @@ def collect(reports_dir: str) -> dict:
     ran: dict[str, int | None] = {}
 
     for tool, _label, rel in SOURCES:
-        data = dashboard.load_sarif(os.path.join(reports_dir, rel), tool)
+        data = sarif.load_sarif(os.path.join(reports_dir, rel), tool)
         if data is None:
             ran[tool] = None          # NOT RUN — never coerced to zero
             continue
@@ -102,7 +102,7 @@ def collect(reports_dir: str) -> dict:
                 "note": rec.get("note", ""),
             })
 
-    findings.sort(key=lambda f: (dashboard.SEV_ORDER.index(f["sev"]), f["tool"], f["loc"]))
+    findings.sort(key=lambda f: (sarif.SEV_ORDER.index(f["sev"]), f["tool"], f["loc"]))
 
     def facet(field: str, labels: dict | None = None, order: list | None = None) -> list[dict]:
         counts: dict[str, int] = {}
@@ -120,7 +120,7 @@ def collect(reports_dir: str) -> dict:
         "ran": ran,
         "judged": triagelib.summary(recorded),
         "facets": {
-            "sev": facet("sev", SEV_LABEL, dashboard.SEV_ORDER),
+            "sev": facet("sev", SEV_LABEL, sarif.SEV_ORDER),
             "tool": facet("tool", TOOL_LABEL, [t for t, _, _ in SOURCES]),
             "verdict": facet("verdict", VERDICT_LABEL, ["", "confirmed",
                                                         "false-positive", "inconclusive"]),

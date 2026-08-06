@@ -29,18 +29,23 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import style     # shared with the web UI: the report and the interface are one product
 import triage    # human verdicts recorded in the UI, shown here
+import dimensions  # el registro único: la lista de dimensiones vivía copiada en seis sitios
+import sarif     # el ÚNICO lector de SARIF; vivía aquí dentro y lo leían tres módulos por sys.path
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
+# Re-exportado a propósito: ui/findings.py llega a estos nombres como `dashboard.load_sarif` y
+# `dashboard.SEV_ORDER`. El parser se fue a tools/sarif.py para que gate.sh pueda usar EL MISMO
+# —antes contaba con `grep -o '"ruleId"'`, así que el veredicto y el informe leían el mismo
+# archivo con dos lectores distintos—, pero mover a la vez el parser y a sus consumidores habría
+# hecho imposible comprobar que el informe no cambió ni un byte.
+SEV_ORDER = sarif.SEV_ORDER
+LEVEL_MAP = sarif.LEVEL_MAP
+read_json = sarif.read_json
+severity_of = sarif.severity_of
+load_sarif = sarif.load_sarif
+
 # ---------------------------------------------------------------- data loading
-
-
-def read_json(path):
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception:
-        return None
 
 
 def env_get(env_path, key, default=""):
@@ -54,77 +59,6 @@ def env_get(env_path, key, default=""):
     except Exception:
         pass
     return default
-
-
-# ---------------------------------------------------------------- SARIF parsing
-
-SEV_ORDER = ["critical", "high", "medium", "low", "unranked"]
-LEVEL_MAP = {"error": "high", "warning": "medium", "note": "low", "none": "low"}
-
-
-def severity_of(result, rule):
-    """Resolve severity across tools that each put it somewhere different.
-
-    Trivy tags it (CRITICAL/HIGH/...) and also gives CVSS; semgrep tags it; ZAP uses the SARIF
-    `level`; gitleaks says nothing at all. Order matters: an explicit tag beats a derived score,
-    and a score beats the generic level, because `level` collapses distinctions the tool made.
-    """
-    props = (rule or {}).get("properties", {}) or {}
-    for tag in props.get("tags", []) or []:
-        t = str(tag).strip().lower()
-        if t in ("critical", "high", "medium", "low"):
-            return t
-    score = props.get("security-severity")
-    if score is not None:
-        try:
-            s = float(score)
-            if s >= 9.0:
-                return "critical"
-            if s >= 7.0:
-                return "high"
-            if s >= 4.0:
-                return "medium"
-            return "low"
-        except (TypeError, ValueError):
-            pass
-    lvl = result.get("level") or (rule or {}).get("defaultConfiguration", {}).get("level")
-    if lvl:
-        return LEVEL_MAP.get(str(lvl).lower(), "unranked")
-    return "unranked"
-
-
-def load_sarif(path, tool=""):
-    """-> {'count': n, 'sev': {...}, 'findings': [...]} or None when the file is absent.
-
-    None means NOT RUN and is rendered as such. It is never coerced to zero."""
-    doc = read_json(path)
-    if not doc:
-        return None
-    out = {"count": 0, "sev": {k: 0 for k in SEV_ORDER}, "findings": []}
-    for run in doc.get("runs", []):
-        rules = {r.get("id"): r for r in run.get("tool", {}).get("driver", {}).get("rules", [])}
-        for res in run.get("results", []):
-            rule = rules.get(res.get("ruleId"), {})
-            sev = severity_of(res, rule)
-            out["count"] += 1
-            out["sev"][sev] = out["sev"].get(sev, 0) + 1
-            loc, line = "", ""
-            locs = res.get("locations") or []
-            if locs:
-                phys = locs[0].get("physicalLocation", {})
-                loc = phys.get("artifactLocation", {}).get("uri", "")
-                line = phys.get("region", {}).get("startLine", "")
-            out["findings"].append({
-                "tool": tool,
-                "rule": res.get("ruleId", "?"),
-                "name": (rule.get("name") or rule.get("shortDescription", {}).get("text") or ""),
-                "sev": sev,
-                "msg": (res.get("message", {}) or {}).get("text", "")[:400],
-                "loc": loc,
-                "line": line,
-            })
-    out["findings"].sort(key=lambda f: SEV_ORDER.index(f["sev"]))
-    return out
 
 
 def load_playwright(path):
@@ -217,20 +151,9 @@ E = html.escape
 
 
 
-def sev_bar(sev):
-    total = sum(sev.values()) or 1
-    parts = "".join(
-        f'<i class="s-{k}" style="width:{sev[k] / total * 100:.1f}%"></i>'
-        for k in SEV_ORDER if sev.get(k)
-    )
-    return f'<div class="sevbar">{parts}</div>'
+sev_bar = style.sev_bar     # compartida con la interfaz: ver tools/style.py
 
-
-def sev_chips(sev):
-    chips = "".join(
-        f'<span class="chip">{k} <b>{sev[k]}</b></span>' for k in SEV_ORDER if sev.get(k)
-    )
-    return f'<div class="chips">{chips}</div>' if chips else ""
+sev_chips = style.sev_chips
 
 
 def findings_block(data, limit=25, verdicts=None):
@@ -272,44 +195,48 @@ def build(target, root):
     tier = run_tier(target, root)
     # Dimensions that need a live application, so they can be reported as
     # unavailable rather than as skipped when the profile is still on rung 1.
-    live_dims = {'Superficie runtime (DAST)', 'Autorización y flujos', 'Carga'}
-
-    dims = [
-        ("Secretos en la historia git", "gitleaks", load_sarif(f"{rep}/gitleaks.sarif", "gitleaks"),
-         "gitleaks.sarif"),
-        ("Dependencias / CVE", "Trivy fs", load_sarif(f"{rep}/trivy/trivy-fs.sarif", "trivy-fs"),
-         "trivy/trivy-fs.sarif"),
-        ("Configuración de contenedores", "Trivy config",
-         load_sarif(f"{rep}/trivy/trivy-config.sarif", "trivy-config"), "trivy/trivy-config.sarif"),
-        ("CVE de imágenes", "Trivy image", load_sarif(f"{rep}/trivy/trivy-image.sarif", "trivy-image"),
-         "trivy/trivy-image.sarif"),
-        ("SAST", "semgrep", load_sarif(f"{rep}/semgrep/semgrep.sarif", "semgrep"), "semgrep/semgrep.sarif"),
-        # Exported from the server by `make sonar`; before that it analysed and left nothing behind.
-        ("Calidad (SonarQube)", "SonarQube", load_sarif(f"{rep}/sonar/sonar.sarif", "sonar"),
-         "sonar/sonar.sarif"),
-        # Qodana es una dimensión con hallazgos, no un enlace a un HTML. Mientras se pintó como
-        # "sí / NO EJECUTADO" con un guion en la columna de cuenta, una corrida con cientos de
-        # inspecciones se leía igual que una limpia. tools/qodana-sarif.py produce este archivo.
-        ("Calidad (Qodana)", "Qodana", load_sarif(f"{rep}/qodana/qodana.sarif", "qodana"),
-         "qodana/qodana.sarif"),
-        ("Contrato de API (OpenAPI)", "Spectral", load_sarif(f"{rep}/api/spectral.sarif", "api-lint"),
-         "api/spectral.sarif"),
-        ("Superficie runtime (DAST)", "OWASP ZAP", load_sarif(f"{rep}/zap/zap.sarif", "zap"),
-         "zap/zap-report.html"),
-    ]
+    # La última de las SEIS copias de la misma lista. Ahora sale del registro
+    # (lib/dimensions.yml), igual que gate.sh, run-manifest.sh, ui/findings.py y ui/app.py.
+    #
+    # `live` ya no se decide comparando el título contra un conjunto de cadenas escritas a mano
+    # —que se rompía en cuanto alguien retocaba una etiqueta— sino leyendo el campo del registro.
+    #
+    # Notas que valía la pena conservar de la lista anterior:
+    #   * SonarQube se exporta del servidor con `make sonar`; antes de eso analizaba y no dejaba
+    #     nada detrás.
+    #   * Qodana es una dimensión CON HALLAZGOS, no un enlace a un HTML. Mientras se pintó como
+    #     "sí / NO EJECUTADO" con un guion en la columna de cuenta, una corrida con cientos de
+    #     inspecciones se leía igual que una limpia.
+    #   * El artefacto móvil es el binario que se distribuye, no el código que lo produjo: el
+    #     bundle firmado lleva configuración compilada, assets y SDKs que ningún escaneo del
+    #     repositorio ve.
+    dimlist = [d for d in dimensions.load() if d.kind == "findings"]
+    live_dims = {d.label for d in dimlist if d.live}
+    dims = [(d.label, d.tool or d.id, load_sarif(d.path(rep), d.id), d.link) for d in dimlist]
     pw = load_playwright(f"{rep}/playwright/results.json")
     k6 = load_k6(f"{rep}/k6/summary.json")
     sbom = os.path.exists(f"{rep}/sbom/sbom.spdx.json")
 
     # ---- header
+    # Which revision was audited. RUN.md carries one row per repository (a project is not always
+    # one checkout), so the header summarises them: `repo@sha` joined, and whether any tree was
+    # dirty or any branch out of sync — because that qualifies every number on this page.
     commit = "—"
     run_md = os.path.join(rep, "RUN.md")
     if os.path.exists(run_md):
+        repos, caveat = [], False
         with open(run_md, encoding="utf-8") as fh:
             for line in fh:
-                if line.startswith("- commit:"):
+                if line.startswith("- commit:"):          # manifests written before the repo table
                     commit = line.split("`")[1] if "`" in line else line.split(":", 1)[1].strip()
                     break
+                if line.startswith("| `") and "|" in line[3:]:
+                    cells = [c.strip().strip("`") for c in line.strip().strip("|").split("|")]
+                    if len(cells) >= 5 and not cells[0].startswith("-"):
+                        repos.append(f"{cells[0]}@{cells[2].split()[0]}")
+                        caveat = caveat or "**" in line
+        if repos:
+            commit = ", ".join(repos) + (" ⚠ árbol sucio o rama desalineada" if caveat else "")
     src = env_get(env, "SRC_PATH", "—")
 
     parts = [f"""<!doctype html><html lang="es"><head><meta charset="utf-8">

@@ -34,11 +34,12 @@ guard:
 	@# "AccessDeniedException" on a directory a root container created first. Whoever gets
 	@# there first decides the owner, so we get there first.
 	@mkdir -p $(REPORTS) $(REPORTS)/trivy $(REPORTS)/semgrep $(REPORTS)/sbom $(REPORTS)/sonar \
-	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build
+	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build \
+	          $(REPORTS)/api $(REPORTS)/mobile $(REPORTS)/device
 
-.PHONY: budget help list new detect doctor guard require-live clone up down purge status gate dashboard run-manifest ui ui-stop ui-logs \
-        sonar qodana semgrep secrets deps config-scan image-scan sbom static \
-        build dast perf perf-jmeter e2e live all api-lint api-fuzz
+.PHONY: budget help list new detect doctor guard require-live require-auth clone up down purge status gate dashboard run-manifest doc-check ui ui-stop ui-logs \
+        sonar qodana semgrep secrets deps config-scan image-scan sbom mobile-scan static \
+        build dast perf perf-jmeter e2e device-e2e live all api-lint api-fuzz
 
 help:             ##[admin] show this list, grouped by what each goal needs
 	@echo ""
@@ -75,19 +76,25 @@ secrets: guard    ##[code] gitleaks + trufflehog: every repo's history + a worki
 	@tools/secrets.sh "$(TARGET)"
 
 deps: guard       ##[code] Trivy filesystem scan (dependency CVEs + secrets + misconfig)
-	$(DC) --profile static run --rm trivy
+	@tools/run-dimension.sh "$(TARGET)" trivy-fs
 
 config-scan: guard ##[code] Trivy over the target's own Dockerfiles / compose / k8s
-	$(DC) --profile static run --rm trivy-config
+	@tools/run-dimension.sh "$(TARGET)" trivy-config
 
 image-scan: guard ##[code] Trivy over a built image:  make image-scan TARGET=x IMAGE=repo:tag
-	IMAGE=$(IMAGE) $(DC) --profile static run --rm trivy-image
+	@IMAGE=$(IMAGE) tools/run-dimension.sh "$(TARGET)" trivy-image
 
 sbom: guard       ##[code] Syft SBOM + licences
-	$(DC) --profile static run --rm syft
+	@tools/run-dimension.sh "$(TARGET)" sbom
+
+mobile-scan: guard ##[code] MobSF over the distributable bundle (.apk/.ipa/.aab)
+	@# The source tree is not what reaches the user. On a mobile project the audited object is the
+	@# signed artifact, which carries compiled config, bundled assets and third-party SDKs that no
+	@# repository scan sees. Declare it with MOBILE_ARTIFACT in target.env; absent = NOT AVAILABLE.
+	@tools/mobile-scan.sh "$(TARGET)"
 
 semgrep: guard    ##[code] polyglot SAST with taint tracking
-	$(DC) --profile static run --rm semgrep
+	@tools/run-dimension.sh "$(TARGET)" semgrep
 
 sonar: guard      ##[code] SonarQube server + scanner
 	@# Sonar es la única herramienta del lab que necesita un SERVIDOR, y cada perfil levanta el
@@ -107,6 +114,17 @@ sonar: guard      ##[code] SonarQube server + scanner
 	@# RUN.md and from the report. A dimension that ran and left no artifact is indistinguishable
 	@# from one that never ran, which is the failure this lab keeps insisting must not happen.
 	@tools/sonar-sarif.py $(REPORTS)/sonar
+	@tools/stamp.sh "$(TARGET)" sonar || true
+	@# El servidor ya cumplio: el analisis vive en sonar.sarif y en issues.json. Dejarlo encendido
+	@# cuesta tres procesos JVM (web, compute engine y Elasticsearch) que siguen compitiendo por la
+	@# RAM del operador hasta el proximo `make down` — y en una maquina de 15 GB con un navegador y
+	@# un editor abiertos, eso fue una congelacion de 21 minutos y un OOM kill sobre VSCode.
+	@# `stop`, no `down`: el volumen sobrevive, asi que la siguiente corrida no reindexa desde cero.
+	@# SONAR_KEEP=1 lo deja arriba para consultar la interfaz en 127.0.0.1:$(SONAR_PORT).
+	@if [ -z "$(SONAR_KEEP)" ]; then \
+	  $(DC) --profile static stop sonarqube >/dev/null 2>&1 && \
+	  echo "sonar: servidor detenido (SONAR_KEEP=1 para dejarlo arriba)"; \
+	fi
 
 qodana: guard     ##[code] JetBrains Qodana (linter resuelto desde LANGS; QODANA_IMAGE lo fija a mano)
 	@# Antes: `QODANA_IMAGE=` vacío = salto declarado. Los CUATRO perfiles versionados lo tenían
@@ -119,7 +137,7 @@ qodana: guard     ##[code] JetBrains Qodana (linter resuelto desde LANGS; QODANA
 	  echo "qodana: NO DISPONIBLE para este perfil (razón arriba). No es un PASS: run-manifest"; \
 	  echo "        y el informe siguen leyendo el artefacto ausente como NO EJECUTADO."; \
 	else \
-	  QODANA_IMAGE="$$img" $(DC) --profile static run --rm qodana || true; \
+	  QODANA_IMAGE="$$img" tools/run-dimension.sh "$(TARGET)" qodana || true; \
 	fi
 	@# Mismo criterio que ZAP: Qodana sale != 0 cuando ENCUENTRA cosas (su umbral de fallo), y una
 	@# herramienta informa, no juzga —el veredicto es de `make gate`—. Pero "ignora el código de
@@ -152,7 +170,7 @@ dast: guard require-live       ##[live] OWASP ZAP against the running app
 	@# pipeline over a note. Same principle as `make gate`: a tool reports, it does not judge.
 	@# But "ignore the exit code" must not hide a tool that never ran, so the success criterion
 	@# becomes the artifact: ZAP is done when its report exists.
-	-$(DC) --profile dast run --rm zap
+	-@tools/run-dimension.sh "$(TARGET)" zap
 	@test -s $(REPORTS)/zap/zap-report.json \
 	  || { echo "ZAP produced no report — check permissions on $(REPORTS)/zap and the plan"; exit 1; }
 	@# ZAP escribe SU formato, no SARIF. Sin esta conversión el gate cuenta 0 alertas sobre un
@@ -162,7 +180,7 @@ dast: guard require-live       ##[live] OWASP ZAP against the running app
 	@echo "ZAP report: $(REPORTS)/zap/zap-report.html"
 
 perf: guard require-live       ##[live] k6 load test
-	$(DC) --profile perf run --rm k6
+	@tools/run-dimension.sh "$(TARGET)" k6
 
 perf-jmeter: guard require-live ##[live] load with an existing JMeter .jmx plan (second engine)
 	@# Not a substitute for `perf`. It exists so a team's own .jmx — usually the only executable
@@ -174,28 +192,59 @@ perf-jmeter: guard require-live ##[live] load with an existing JMeter .jmx plan 
 	@# write into a non-empty -o directory. Both abort the run BEFORE any request is made, so the
 	@# previous run's numbers stay on disk and the operator reads a stale report as a fresh one.
 	@rm -rf $(REPORTS)/jmeter/results.jtl $(REPORTS)/jmeter/html
-	$(DC) --profile perf-jmeter run --rm jmeter
+	@tools/run-dimension.sh "$(TARGET)" jmeter
 	@echo "JMeter report: $(REPORTS)/jmeter/html/index.html"
 
 api-lint: guard   ##[code] Spectral: is the OpenAPI description itself sound
 	@# The spec is part of the repository, so this needs no running app. Absent spec = the
 	@# dimension is NOT AVAILABLE, which the manifest records differently from NOT RUN.
-	@if [ -z "$$(sed -n 's/^OPENAPI_SPEC=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')" ]; then \
+	@# Se lee con tools/envget.sh, NO con un sed en linea: ese sed ignoraba target.env.local, que
+	@# es justo donde el laboratorio documenta que van los valores del despliegue real. Con el spec
+	@# declarado en el .local, este goal respondia "no publica OpenAPI" y la dimension se reportaba
+	@# NO DISPONIBLE teniendo el documento delante.
+	@if [ -z "$$(tools/envget.sh $(TARGET) OPENAPI_SPEC)$$(tools/envget.sh $(TARGET) OPENAPI_SPEC_URL)" ]; then \
 	  echo "api-lint: OPENAPI_SPEC is empty — this project publishes no OpenAPI document."; \
 	  echo "          NOT AVAILABLE, not skipped: there is nothing to lint."; \
 	else \
-	  $(DC) --profile static run --rm api-lint; \
+	  spec="$$(tools/envget.sh $(TARGET) OPENAPI_SPEC)"; \
+	  [ -n "$$spec" ] || spec="$$(tools/envget.sh $(TARGET) OPENAPI_SPEC_URL)"; \
+	  OPENAPI_SPEC="$$spec" tools/run-dimension.sh "$(TARGET)" api-lint || true; \
+	  test -s $(REPORTS)/api/spectral.sarif \
+	    || { echo "api-lint: no spectral.sarif — the dimension did NOT run"; exit 1; }; \
 	fi
+	@# Spectral exits != 0 when it FINDS things (--fail-severity error). Same rule as every other
+	@# tool here: a tool reports, `make gate` judges. Letting the exit code through aborted
+	@# `make static` on a spec with findings — which is precisely the spec worth auditing. The
+	@# success criterion is the artifact, so a tool that genuinely failed still stops the run.
 
 api-fuzz: guard require-live   ##[live] Schemathesis: does the API obey its own contract
-	@if [ -z "$$(sed -n 's/^OPENAPI_SPEC=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')$$(sed -n 's/^OPENAPI_SPEC_URL=//p' targets/$(TARGET)/target.env | tail -1 | tr -d '[:space:]')" ]; then \
+	@# Schemathesis sale != 0 cuando ENCUENTRA violaciones de contrato, que es justo el caso que
+	@# interesa auditar. Dejar pasar ese codigo abortaba el goal sobre una corrida CORRECTA: la
+	@# herramienta informa, `make gate` juzga — la misma regla que ya siguen zap, qodana y
+	@# api-lint. El criterio de exito es el ARTEFACTO, asi que una herramienta que fallo de verdad
+	@# (sin dejar XML) sigue deteniendo la corrida.
+	@if [ -z "$$(tools/envget.sh $(TARGET) OPENAPI_SPEC)$$(tools/envget.sh $(TARGET) OPENAPI_SPEC_URL)" ]; then \
 	  echo "api-fuzz: no OPENAPI_SPEC / OPENAPI_SPEC_URL — NOT AVAILABLE for this profile."; \
 	else \
-	  $(DC) --profile api run --rm api-fuzz; \
+	  tools/run-dimension.sh "$(TARGET)" api-fuzz || true; \
+	  test -s $(REPORTS)/api/schemathesis.xml \
+	    || { echo "api-fuzz: no schemathesis.xml — la dimension NO se ejecuto"; exit 1; }; \
 	fi
 
-e2e: guard require-live        ##[live] Playwright functional / authz flows
-	$(DC) --profile e2e run --rm playwright
+device-e2e: guard  ##[live] the app on a real device, journey by journey (adb, host tooling)
+	@# The one dimension that is not hermetic: the phone is attached to this machine. Everything
+	@# else measures a server; this measures what the user's session actually does over time —
+	@# idle, logout, re-login rate limits, cleared data. Needs a TTY: it is conducted, not run.
+	@tools/device-e2e.sh "$(TARGET)"
+
+e2e: guard require-live require-auth  ##[live] Playwright functional / authz flows
+	@# require-auth es nuevo y sustituye a la SIEMBRA. El laboratorio creaba las dos cuentas antes
+	@# de auditar (seed-users.sh + fixture SQL, 407 lineas, ya eliminadas): una matriz de
+	@# autorizacion sobre cuentas fabricadas por el propio laboratorio mide el accesorio, no el
+	@# control de acceso del sistema. Ahora las credenciales las entrega el operador QA y se
+	@# comprueban ANTES — sin eso, dos credenciales malas producian 30 specs en rojo que se leian
+	@# como 30 fallos de autorizacion.
+	@tools/run-dimension.sh "$(TARGET)" playwright
 
 budget: guard require-live     ##[live] presupuesto del hilo principal del navegador (R8 3.22)
 	$(DC) --profile e2e run --rm playwright sh -c "mkdir -p /run && cp -r /e2e/. /run/ && mkdir -p /run/lib && cp -r /seclab-lib/. /run/lib/ && cd /run && npm init -y >/dev/null 2>&1 && npm i -D @playwright/test@1.49.0 >/dev/null 2>&1 && npx playwright test lib/specs/main-thread-budget.spec.ts --reporter=line"
@@ -207,6 +256,9 @@ all: static live  ##[live] full pipeline (bring the application up first)
 require-live: guard
 	@tools/require-live.sh "$(TARGET)"
 
+require-auth: guard
+	@tools/require-auth.sh "$(TARGET)"
+
 # ---- run bookkeeping ----
 run-manifest: guard ##[admin] write reports/$(TARGET)/RUN.md (commit, digests, envelope, coverage)
 	@tools/run-manifest.sh "$(TARGET)"
@@ -216,6 +268,12 @@ gate: guard       ##[admin] exit != 0 when the thresholds in target.env are brea
 
 dashboard: guard  ##[admin] build reports/$(TARGET)/index.html — one readable page from every tool
 	@tools/dashboard.py "$(TARGET)"
+
+doc-check:        ##[admin] ¿README y MANUAL siguen coincidiendo con lib/dimensions.yml?
+	@# La tabla de dimensiones de los documentos era la séptima copia de la misma lista, y
+	@# estaba tan desactualizada como las otras seis. Una tabla en un .md envejece más rápido
+	@# que el código porque nada falla cuando miente; esto es lo que la hace fallar.
+	@tools/doc-check.sh
 
 status: guard     ##[admin] what is up, what has been run, what is missing
 	@tools/status.sh "$(TARGET)"

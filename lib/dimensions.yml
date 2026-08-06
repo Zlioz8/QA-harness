@@ -1,0 +1,495 @@
+# El registro de dimensiones — la ÚNICA lista de lo que este laboratorio sabe hacer.
+#
+# Por qué existe: la misma lista estaba escrita SEIS veces (los goals del Makefile, los bloques de
+# umbral de tools/gate.sh, la tabla chk() de tools/run-manifest.sh, la lista dims de
+# tools/dashboard.py, SOURCES de ui/findings.py y las sources de _triage_blocks en ui/app.py).
+# Añadir una dimensión eran seis ediciones, y olvidar una no daba error: daba un fallo silencioso.
+#
+# Ya había derivado. Medido antes de escribir esto:
+#   - ui/app.py leía zap/zap-report.json mientras ui/findings.py leía zap/zap.sarif. En
+#     anuncios_de_plataforma el primero es formato ZAP crudo (clave "site", sin "runs"), así que
+#     load_sarif() devolvía None y la pantalla de triaje omitía ZAP ENTERO, en silencio.
+#   - _triage_blocks no incluía sonar, qodana, api-lint ni mobsf; findings.py no incluía mobsf.
+#     Hallazgos reales que no se podían juzgar desde una de las dos pantallas.
+#
+# FORMATO: claves planas, un nivel, sin anclas ni bloques multilínea. Es deliberado —
+# tools/dimensions.py lo parsea con la biblioteca estándar, porque PyYAML no es dependencia del
+# laboratorio y no va a serlo por una lista de dieciocho entradas.
+#
+# CAMPOS
+#   id         identificador corto. Es la clave del triaje (triage.key_for) y el nombre del test
+#              en DefectDojo. NO cambiarlo: rompe los veredictos ya registrados.
+#   label      lo que lee una persona. En español, como el resto de la interfaz.
+#   goal       el goal del Makefile que la produce. La UI lo usa para el botón.
+#   kind       cómo se lee el artefacto. findings | verdict | metrics | junit | sbom | manual
+#              Nace con los seis valores aunque hoy solo se usen dos: cambiar el esquema después
+#              obligaría a reescribir a los seis consumidores otra vez.
+#   artifact   UNA ruta canónica bajo reports/<target>/. Una sola. El bug de ZAP fue exactamente
+#              tener dos, y que cada consumidor eligiera la suya.
+#   script     EL GUION: el archivo que la HERRAMIENTA INTERPRETA, relativo a targets/<t>/.
+#              Vacío = esta herramienta no lleva guion (apuntas al árbol y ya: trivy, syft,
+#              trufflehog). Puede llevar ${VAR}: el plan de JMeter y el script de k6 se eligen
+#              desde el perfil.
+#
+#              ES EL TECHO DE LA COBERTURA, no solo una entrada más. Medido: antiplagio corrió
+#              la carga con k6/smoke.js, TRES peticiones, y el informe dice «Carga: p95 30ms
+#              PASS» — verdad, y casi sin significado. costos_web tiene diez guiones de carga
+#              (stress_ramp, capacity_multiuser, import_stress…). Hoy las dos se pintan igual.
+#              Por eso el guion tiene que verse, con su alcance, junto a la dimensión.
+#   script_kind  qué ES ese archivo, para que se lea sin abrirlo:
+#              plan | script | specs | reglas | config
+#   object     LO AUDITADO cuando no es el código: el binario firmado, una imagen construida, el
+#              documento OpenAPI. Ni ajuste ni guion — es el sujeto. Sin él la dimensión no
+#              tiene sobre qué operar, y eso es NO DISPONIBLE, no «sin hallazgos».
+#   inputs     QUÉ le pide esta dimensión al operador, en claves de target.env, separadas por
+#              comas. Un `|` entre dos claves significa "una u otra basta". Es lo que permite que
+#              la interfaz muestre, antes de correr nada, qué falta por rellenar para cada
+#              herramienta — la primera columna del diagrama: entrada -> herramienta -> salida.
+#   gate       la clave de target.env que fija el umbral. Vacío = la dimensión no juzga.
+#   default    el valor que gate.sh usaba inline cuando el perfil no declara la clave. Se registra
+#              aquí para no perderlo; que se AVISE de que es un defecto no declarado es fase 2.
+#   live       necesita la aplicación respondiendo (peldaño 2+).
+#   triage     aparece en las pantallas de juicio humano.
+#   class      presupuesto de recursos: light | server | browser | load    (ver `mem`)
+#   mem        techo de memoria. Se convierte en mem_limit del servicio compose.
+#   measured   si `mem` sale de medir con `docker stats` o es una estimación. NO se miente aquí:
+#              hoy solo ZAP tiene número medido (2g, tras un pico real de 7,59 GiB que congeló la
+#              máquina y provocó un OOM sobre el editor — ver docker-compose.yml:234-241).
+#              tools/admit.sh trata `false` como estimación y lo dice.
+#   needs      qué tiene que tocar para funcionar: source | target-network | nothing | device
+#              Es lo que decide si la dimensión puede moverse a otro servidor, y no es balanceo de
+#              carga: mandar 2,78 GB de node_modules a un runner remoto es peor que analizarlo
+#              aquí. `nothing` = es un servicio REST, su host es una variable y puede vivir donde
+#              sea (sonarqube y mobsf ya son así hoy).
+#   runner     dónde se ejecuta. Hoy SOLO se implementa `local`; los demás valores están
+#              documentados y sin implementar a propósito, para que tools/run-dimension.sh sea la
+#              única indirección que haya que tocar el día que llegue el segundo servidor.
+#              local | ssh://host | context:nombre | url:https://...
+
+# ---------------------------------------------------------------- secretos
+
+- id: gitleaks
+  label: Secretos en la historia git
+  tool: gitleaks
+  goal: secrets
+  service: 
+  profile: 
+  kind: findings
+  artifact: gitleaks.sarif
+  inputs: SRC_PATH
+  script: gitleaks.toml
+  script_kind: reglas
+  object: 
+  gate: ALLOW_SECRETS
+  default: 0
+  live: false
+  triage: true
+  class: light
+  mem: 2g
+  measured: false
+  needs: source
+  runner: local
+
+# La dimensión que el laboratorio ya ejecutaba y TIRABA. tools/secrets.sh:87-97 escribe
+# reports/<t>/trufflehog.txt y no lo leía nadie: ni el gate, ni RUN.md, ni el informe, ni el
+# triaje. Y es la única herramienta de todo el lab que VERIFICA — llama a la API del proveedor
+# para comprobar si la credencial sigue viva. gitleaks no puede hacer eso. Un secreto
+# verificado-vivo no admite presupuesto, de ahí default 0.
+- id: trufflehog
+  label: Secretos verificados en vivo
+  tool: TruffleHog
+  goal: secrets
+  service: 
+  profile: 
+  kind: findings
+  artifact: trufflehog.sarif
+  inputs: SRC_PATH
+  script: 
+  script_kind: 
+  object: 
+  gate: MAX_VERIFIED_SECRETS
+  default: 0
+  live: false
+  triage: true
+  class: light
+  mem: 2g
+  measured: false
+  needs: source
+  runner: local
+
+# ---------------------------------------------------------------- dependencias y contenedores
+
+- id: trivy-fs
+  label: Dependencias / CVE
+  tool: Trivy fs
+  goal: deps
+  service: trivy
+  profile: static
+  kind: findings
+  artifact: trivy/trivy-fs.sarif
+  inputs: SRC_PATH
+  script: 
+  script_kind: 
+  object: 
+  gate: MAX_DEP_FINDINGS
+  default: 999
+  live: false
+  triage: true
+  class: light
+  mem: 2g
+  measured: false
+  needs: source
+  runner: local
+
+- id: trivy-config
+  label: Configuración de contenedores
+  tool: Trivy config
+  goal: config-scan
+  service: trivy-config
+  profile: static
+  kind: findings
+  artifact: trivy/trivy-config.sarif
+  inputs: SRC_PATH
+  script: 
+  script_kind: 
+  object: 
+  gate:
+  default:
+  live: false
+  triage: true
+  class: light
+  mem: 1g
+  measured: false
+  needs: source
+  runner: local
+
+- id: trivy-image
+  label: CVE de imágenes
+  tool: Trivy image
+  goal: image-scan
+  service: trivy-image
+  profile: static
+  kind: findings
+  artifact: trivy/trivy-image.sarif
+  inputs: SRC_PATH,IMAGE
+  script: 
+  script_kind: 
+  object: IMAGE
+  gate:
+  default:
+  live: false
+  triage: true
+  class: light
+  mem: 2g
+  measured: false
+  needs: source
+  runner: local
+
+# El SBOM se genera y hoy no lo consume nadie: gate.sh no lo mira y run-manifest solo comprueba
+# que el archivo exista. kind: sbom lo deja declarado como lo que es —un inventario, no una lista
+# de hallazgos— para que Grype pueda encadenarse encima sin fingir que el SBOM juzga algo.
+- id: sbom
+  label: Inventario de componentes (SBOM)
+  tool: Syft
+  goal: sbom
+  service: syft
+  profile: static
+  kind: sbom
+  artifact: sbom/sbom.spdx.json
+  inputs: SRC_PATH
+  script: 
+  script_kind: 
+  object: 
+  gate:
+  default:
+  live: false
+  triage: false
+  class: light
+  mem: 1g
+  measured: false
+  needs: source
+  runner: local
+
+# ---------------------------------------------------------------- código
+
+- id: semgrep
+  label: SAST
+  tool: semgrep
+  goal: semgrep
+  service: semgrep
+  profile: static
+  kind: findings
+  artifact: semgrep/semgrep.sarif
+  inputs: SRC_PATH,SEMGREP_CONFIG
+  script: 
+  script_kind: reglas
+  object: 
+  gate: MAX_SAST_FINDINGS
+  default: 999
+  live: false
+  triage: true
+  class: light
+  mem: 4g
+  measured: false
+  needs: source
+  runner: local
+
+# Calidad: DOS motores, y a partir de la fase 2 DOS presupuestos. gate.sh:59-79 los sumaba contra
+# uno solo. El argumento de entonces (son dos motores preguntando lo mismo) no se sostiene: un
+# hallazgo de Sonar puede ser una convención de nombres y uno de Qodana una inspección de estilo,
+# no son la misma unidad, y sumarlas contra un entero no es una medición.
+- id: sonar
+  label: Calidad (SonarQube)
+  tool: SonarQube
+  goal: sonar
+  service: 
+  profile: 
+  kind: findings
+  artifact: sonar/sonar.sarif
+  inputs: SRC_PATH,SONAR_PORT
+  script: sonar-project.properties
+  script_kind: config
+  object: 
+  gate: MAX_QUALITY_FINDINGS
+  default: 500
+  live: false
+  triage: true
+  class: server
+  mem: 4g
+  measured: false
+  needs: nothing
+  runner: local
+
+# needs: nothing y runner soportando `url:` no es teoría — docker-compose.yml:67 ya pasa
+# SONAR_HOST_URL al scanner. Apuntarlo a un SonarQube desplegado en otra máquina quita tres JVMs
+# de esta laptop (el `make sonar` que la congeló 21 minutos y provocó un OOM sobre VSCode),
+# elimina la razón de ser de tools/sonar-free-port.sh, y de paso da historia entre corridas
+# gratis: un servidor persistente conserva el análisis anterior.
+
+- id: qodana
+  label: Calidad (Qodana)
+  tool: Qodana
+  goal: qodana
+  service: qodana
+  profile: static
+  kind: findings
+  artifact: qodana/qodana.sarif
+  inputs: SRC_PATH,LANGS
+  script: qodana.yaml
+  script_kind: config
+  object: 
+  gate: MAX_QODANA_FINDINGS
+  default: 500
+  live: false
+  triage: true
+  class: server
+  mem: 4g
+  measured: false
+  needs: source
+  runner: local
+
+# ---------------------------------------------------------------- artefacto distribuible
+
+# El binario que se entrega, no el código que lo produjo. En un proyecto móvil son dos objetos
+# distintos: el bundle firmado lleva configuración compilada, assets y SDKs de terceros que
+# ningún escaneo del repositorio ve.
+- id: mobsf
+  label: Artefacto móvil (APK/IPA)
+  tool: MobSF
+  goal: mobile-scan
+  service: 
+  profile: 
+  kind: findings
+  artifact: mobile/mobsf.sarif
+  inputs: MOBILE_ARTIFACT
+  script: 
+  script_kind: 
+  object: MOBILE_ARTIFACT
+  gate: MAX_MOBILE_FINDINGS
+  default: 100
+  live: false
+  triage: true
+  class: server
+  mem: 4g
+  measured: false
+  needs: nothing
+  runner: local
+
+# ---------------------------------------------------------------- contrato de API
+
+- id: api-lint
+  label: Contrato de API (Spectral)
+  tool: Spectral
+  goal: api-lint
+  service: api-lint
+  profile: static
+  kind: findings
+  artifact: api/spectral.sarif
+  inputs: OPENAPI_SPEC|OPENAPI_SPEC_URL
+  script: spectral.yaml
+  script_kind: reglas
+  object: OPENAPI_SPEC|OPENAPI_SPEC_URL
+  gate: MAX_API_FINDINGS
+  default: 999
+  live: false
+  triage: true
+  class: light
+  mem: 1g
+  measured: false
+  needs: source
+  runner: local
+
+# kind: junit, no findings. Y esto CIERRA UN AGUJERO REAL: gate.sh no tiene un solo bloque que
+# mire api/schemathesis.xml (verificado sobre sus 143 líneas), mientras run-manifest.sh:99 sí lo
+# lista en la cobertura. Resultado: una corrida de fuzzing con veinte violaciones de contrato se
+# leía como "ejecutada" y PASABA el gate.
+- id: api-fuzz
+  label: Contrato vs implementación (Schemathesis)
+  tool: Schemathesis
+  goal: api-fuzz
+  service: api-fuzz
+  profile: api
+  kind: junit
+  artifact: api/schemathesis.xml
+  inputs: APP_INTERNAL_URL,OPENAPI_SPEC|OPENAPI_SPEC_URL
+  script: 
+  script_kind: 
+  object: OPENAPI_SPEC|OPENAPI_SPEC_URL
+  gate:
+  default:
+  live: true
+  triage: false
+  class: light
+  mem: 2g
+  measured: false
+  needs: target-network
+  runner: local
+
+# ---------------------------------------------------------------- runtime
+
+# mem 2g y measured: true — es el ÚNICO número medido de este archivo. Sale de
+# docker-compose.yml:234-241: con el job `openapi` importando 97 operaciones, un escaneo activo
+# alcanzó 7,59 GiB en un host de 15 GiB, el swap llegó al 100%, el escritorio se congeló y el
+# kernel mató el editor del operador. El techo del cgroup es lo único autoritativo porque no
+# depende de que la JVM esté de acuerdo.
+- id: zap
+  label: Superficie runtime (DAST)
+  tool: OWASP ZAP
+  human: zap/zap-report.html
+  goal: dast
+  service: zap
+  profile: dast
+  kind: findings
+  artifact: zap/zap.sarif
+  inputs: APP_INTERNAL_URL,HEALTH_PATH
+  script: zap/automation.yaml
+  script_kind: plan
+  object: 
+  gate: MAX_DAST_FINDINGS
+  default: 999
+  live: true
+  triage: true
+  class: browser
+  mem: 2g
+  measured: true
+  needs: target-network
+  runner: local
+
+- id: playwright
+  label: Autorización y flujos (E2E)
+  tool: Playwright
+  goal: e2e
+  service: playwright
+  profile: e2e
+  kind: junit
+  artifact: playwright/results.json
+  inputs: BASE_URL,AUTH_ADAPTER,ROLE_A_USER,ROLE_A_PASS,ROLE_B_USER,ROLE_B_PASS
+  script: playwright/tests
+  script_kind: specs
+  object: 
+  gate:
+  default:
+  live: true
+  triage: false
+  class: browser
+  mem: 4g
+  measured: false
+  needs: target-network
+  runner: local
+
+# class: load es EXCLUSIVA, y por correctitud antes que por recursos. El generador corre sin
+# límite a propósito (docker-compose.yml:300-301) para no competir con el sistema bajo prueba;
+# pero si semgrep está masticando los 28 núcleos mientras k6 mide el p95, ese número no mide la
+# aplicación, mide la contención de la laptop. PERF_CPUS/PERF_MEM existen para que las cifras
+# sean comparables entre corridas, y la concurrencia anula esa comparabilidad EN SILENCIO.
+- id: k6
+  label: Carga (k6)
+  tool: k6
+  goal: perf
+  service: k6
+  profile: perf
+  kind: metrics
+  artifact: k6/summary.json
+  inputs: APP_INTERNAL_URL
+  script: k6/${K6_SCRIPT:-smoke.js}
+  script_kind: script
+  object: 
+  gate: K6_P95_MS
+  default: 1500
+  live: true
+  triage: false
+  class: load
+  mem: 2g
+  measured: false
+  needs: target-network
+  runner: local
+
+- id: jmeter
+  label: Carga (JMeter)
+  tool: JMeter
+  goal: perf-jmeter
+  service: jmeter
+  profile: perf-jmeter
+  kind: metrics
+  artifact: jmeter/results.jtl
+  inputs: APP_INTERNAL_URL,JMETER_PLAN
+  script: jmeter/${JMETER_PLAN:-plan.jmx}
+  script_kind: plan
+  object: 
+  gate:
+  default:
+  live: true
+  triage: false
+  class: load
+  mem: 4g
+  measured: false
+  needs: target-network
+  runner: local
+
+# ---------------------------------------------------------------- humano
+
+# La única dimensión que no es hermética: el teléfono está enchufado a esta máquina. Todo lo demás
+# mide un servidor; esto mide lo que la sesión del usuario hace de verdad con el tiempo — idle,
+# logout, límites de reintento, datos borrados. No se ejecuta: se conduce. Y por eso no se mueve
+# a otro servidor nunca (needs: device).
+- id: device
+  label: Jornadas en dispositivo real (adb)
+  tool: adb
+  goal: device-e2e
+  service: 
+  profile: 
+  kind: manual
+  artifact: device/jornadas.md
+  inputs: BASE_URL
+  script: 
+  script_kind: 
+  object: 
+  gate:
+  default:
+  live: true
+  triage: false
+  class: light
+  mem: 1g
+  measured: false
+  needs: device
+  runner: local

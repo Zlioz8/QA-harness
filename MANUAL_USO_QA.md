@@ -259,7 +259,9 @@ dimensión **no probada**, jamás como aprobada.
 
 La matriz necesita datos sobre los que la operación autorizada **sí** funcione. Sin ellos, un
 `404` es ambiguo: ¿denegó o no existía? Siembra usuarios y datos sintéticos (ver
-`targets/*/seed-users.sh`, `scenarios/`) y anota en el informe qué escenario usaste.
+y anota en el informe qué escenario usaste. El laboratorio NO siembra usuarios ni escenarios:
+las credenciales las entrega el operador QA y `tools/require-auth.sh` comprueba que funcionan
+antes de correr la matriz.
 
 ### 4.6 Si la aplicación limita peticiones
 
@@ -316,23 +318,31 @@ make image-scan  TARGET=proyecto_x IMAGE=mi-repo:tag
 
 ### Mapa completo: comando → qué mide → artefacto
 
-| Comando | Herramienta | Qué evalúa | Artefacto |
-|---|---|---|---|
-| `secrets` | gitleaks + trufflehog | secretos en **toda** la historia git | `gitleaks.sarif`, `trufflehog.txt` |
-| `deps` | Trivy (fs) | CVE de dependencias | `trivy/trivy-fs.sarif` |
-| `config-scan` | Trivy (config) | Dockerfiles / compose / k8s del proyecto | `trivy/trivy-config.sarif` |
-| `image-scan` | Trivy (image) | CVE de una imagen construida | `trivy/trivy-image.sarif` |
-| `sbom` | Syft | inventario de componentes y licencias | `sbom/sbom.spdx.json` |
-| `semgrep` | semgrep | SAST poliglota con taint | `semgrep/semgrep.sarif` |
-| `sonar` | SonarQube | calidad y mantenibilidad | `sonar/sonar.sarif`, `sonar/issues.json` |
-| `qodana` | JetBrains Qodana | calidad, un lenguaje por imagen | `qodana/qodana.sarif`, `qodana/report/` |
-| `api-lint` | Spectral | ¿la descripción OpenAPI es sólida? | `api/spectral.sarif` |
-| `dast` | OWASP ZAP | superficie runtime, cabeceras, alertas | `zap/zap-report.html`, `zap/zap.sarif` |
-| `e2e` | Playwright | autorización y flujos funcionales | `playwright/results.json`, `playwright/html/` |
-| `perf` | k6 | latencia / throughput bajo carga | `k6/summary.json` |
-| `perf-jmeter` | JMeter | carga con el plan `.jmx` del equipo | `jmeter/html/index.html` |
-| `api-fuzz` | Schemathesis | ¿la API cumple su propio contrato? | `api/schemathesis.xml` |
-| `budget` | Playwright + CDP | presupuesto del hilo principal del navegador | en el log de la corrida |
+<!-- dimensiones:inicio -->
+
+_Tabla generada de `lib/dimensions.yml` con `tools/dimensions.py --markdown`. No la edites a mano: `make doc-check` falla si diverge del registro._
+
+| Dimensión | Herramienta | Comando | Artefacto | Runtime |
+|---|---|---|---|---|
+| Secretos en la historia git | gitleaks | `make secrets` | `gitleaks.sarif` | no |
+| Secretos verificados en vivo | TruffleHog | `make secrets` | `trufflehog.sarif` | no |
+| Dependencias / CVE | Trivy fs | `make deps` | `trivy/trivy-fs.sarif` | no |
+| Configuración de contenedores | Trivy config | `make config-scan` | `trivy/trivy-config.sarif` | no |
+| CVE de imágenes | Trivy image | `make image-scan` | `trivy/trivy-image.sarif` | no |
+| Inventario de componentes (SBOM) | Syft | `make sbom` | `sbom/sbom.spdx.json` | no |
+| SAST | semgrep | `make semgrep` | `semgrep/semgrep.sarif` | no |
+| Calidad (SonarQube) | SonarQube | `make sonar` | `sonar/sonar.sarif` | no |
+| Calidad (Qodana) | Qodana | `make qodana` | `qodana/qodana.sarif` | no |
+| Artefacto móvil (APK/IPA) | MobSF | `make mobile-scan` | `mobile/mobsf.sarif` | no |
+| Contrato de API (Spectral) | Spectral | `make api-lint` | `api/spectral.sarif` | no |
+| Contrato vs implementación (Schemathesis) | Schemathesis | `make api-fuzz` | `api/schemathesis.xml` | **sí** |
+| Superficie runtime (DAST) | OWASP ZAP | `make dast` | `zap/zap.sarif` · `zap/zap-report.html` | **sí** |
+| Autorización y flujos (E2E) | Playwright | `make e2e` | `playwright/results.json` | **sí** |
+| Carga (k6) | k6 | `make perf` | `k6/summary.json` | **sí** |
+| Carga (JMeter) | JMeter | `make perf-jmeter` | `jmeter/results.jtl` | **sí** |
+| Jornadas en dispositivo real (adb) | adb | `make device-e2e` | `device/jornadas.md` | **sí** |
+
+<!-- dimensiones:fin -->
 
 **Qué NO cubre `dast`:** ZAP recorre la aplicación **sin sesión**. Un reporte de ZAP limpio no dice
 nada sobre autorización — nunca inició sesión. Esa es la dimensión de `e2e`.
