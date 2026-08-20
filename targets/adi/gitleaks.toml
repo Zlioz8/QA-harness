@@ -1,0 +1,102 @@
+# gitleaks — reglas escritas PARA adi, no el ejemplo genérico.
+#
+# POR QUÉ NO SIRVE LA PLANTILLA AQUÍ, medido. Su regla `env-assigned-secret` es
+# `[A-Z0-9_]*(PASSWORD|SECRET|TOKEN|...)\s*=\s*\S{4,}` sobre CUALQUIER archivo. En un proyecto
+# PHP eso marca el código que MANEJA contraseñas, no el que las contiene: de 22 hallazgos, siete
+# eran `public ?string $password;` y comparaciones en UpdateUserDTO / ChangePasswordDTO /
+# UserService. Ese ruido no es inocuo — entierra los dos que sí importan
+# (`sonar-project.properties.bak` con un token vivo) y enseña a hojear esta dimensión.
+#
+# CRITERIO: en ADI las credenciales viven en archivos de CONFIGURACIÓN (.env, .properties, .ini,
+# .sql de despliegue) y en documentación de despliegue. En .php una asignación con `password` es
+# casi siempre una variable. Así que la regla amplia se acota por RUTA, y se añaden las formas
+# concretas que este sistema usa — que se sacan de su .env.example, no de un catálogo genérico.
+
+[extend]
+useDefault = true   # AWS, llaves privadas, JWT y `sonar-api-token`, que encontró el token real
+
+# --- Credencial asignada en un archivo de configuración -------------------------------------
+# Acotada a archivos de config y documentación. `\S{4,}` con exclusión explícita de los
+# marcadores de posición: `.env.example` declara las 24 variables VACÍAS a propósito, y marcarlo
+# sería reportar como fuga la plantilla que existe justamente para no tener que filtrar nada.
+[[rules]]
+id = "adi-config-credential"
+description = "Credencial asignada en archivo de configuración o manual de despliegue"
+# gitleaks usa RE2 (Go): NO hay lookahead. Los marcadores de posición se excluyen abajo con
+# el allowlist de la propia regla, que es el mecanismo que RE2 sí ofrece.
+# `[ \t]*` y NO `\s*`: en RE2 `\s` incluye el salto de línea, así que una variable VACÍA
+# —`DASH_ADI_PASS=`, que es como .env.example declara las 24— se tragaba el newline y capturaba
+# la línea siguiente como si fuera su valor. 80 hallazgos, casi todos así.
+#
+# Y solo `PASS`: un nombre de usuario no es una credencial. `DB_USER=postgres` en un manual de
+# despliegue no es una fuga, y meterlo multiplicaba el ruido sin añadir un solo hallazgo real.
+# El primer carácter del valor no puede ser `<`, `$`, `"` ni `'`: eso descarta de raíz
+# `<password>`, `<tu-clave-local>` y `${VAR}`, que es TODO lo que los cuatro manuales de
+# despliegue contienen — verificado recorriendo la historia completa del repositorio, no el
+# árbol actual. Se hace en la regla y no en el allowlist porque el allowlist compara contra el
+# fragmento y con `--redact` el fragmento ya no es el texto original: filtrar aquí es lo único
+# que no depende de esa sutileza.
+regex = '''(?i)\b(DB|DBI|SOFIA|ZAJUNA|CRONJOB|DASH_(PG|ADI|REP|PRES|RES|ORA))_PASS[ \t]*=[ \t]*[^\s#<$"'`]{3,}'''
+path = '''(?i)(\.env($|\.)|\.(properties|ini|conf|cfg|ya?ml|sql|md|txt|bak)$)'''
+tags = ["adi", "config"]
+[rules.allowlist]
+description = "Marcadores de posición: .env.example declara las 24 variables vacías a propósito"
+regexes = [
+  # Marcadores de los manuales: <password_bd>, <password_oracle>, ${VAR}, tu-clave-local.
+  # SIN anclas: gitleaks compara el allowlist contra el FRAGMENTO detectado, no contra la
+  # línea entera, así que un patrón que empezaba en `=` y terminaba en `$` no casaba nunca.
+  '''(<[^>]*>|\$\{[^}]*\}|tu[-_][a-zA-Z_]*|cambiame|changeme|x{3,}|\.\.\.)''',
+]
+
+# --- Tokens de ingesta propios de ADI --------------------------------------------------------
+# `dashboard/server/josso_ingest.php` y `semillas_ingest.php` autentican con estos dos y nada
+# más: quien los tenga escribe en las tablas de reporte sin pasar por el login de la aplicación.
+[[rules]]
+id = "adi-ingest-token"
+description = "Token de ingesta (JOSSO / SEMILLAS): autentica endpoints de escritura sin login"
+regex = '''(?i)\b(JOSSO|SEMILLAS)_INGEST_TOKEN[ \t]*=[ \t]*[^\s#]{8,}'''
+tags = ["adi", "token"]
+[rules.allowlist]
+# `stopwords` en vez de `regexes`: gitleaks las compara como subcadena del fragmento
+# detectado, sin depender de anclas ni de si `--redact` ya transformó el texto. Es el
+# mecanismo pensado para marcadores de posición, y el único que se comportó de forma
+# predecible aquí. Los valores salen del repositorio, no de un catálogo genérico.
+stopwords = ["cambiar_por", "cambiame", "changeme", "tu_token", "token_largo", "ejemplo"]
+regexes = [ '''(\$\{[^}]*\}|<[^>]*>|x{3,})''' ]
+
+# --- SonarQube ------------------------------------------------------------------------------
+# La regla por defecto ya cubre `sqp_`. Esta añade `squ_` (token de usuario) y la forma
+# `sonar.login=`, que es la que usaban las versiones anteriores del scanner.
+[[rules]]
+id = "adi-sonar-credential"
+description = "Credencial de SonarQube (squ_ o sonar.login)"
+regex = '''(?i)(sonar\.(login|password)\s*=\s*\S{6,}|\bsqu_[0-9a-f]{32,})'''
+tags = ["adi", "sonar"]
+
+# --- Cadena de conexión con credenciales embebidas -------------------------------------------
+# Oracle SOFIA y PostgreSQL. La auditoría manual de julio encontró host, usuario y contraseña de
+# Oracle escritos como valores por defecto en `dashboard/config/define.php`: no es un `.env`, es
+# código versionado, así que ninguna regla acotada a archivos de config lo habría visto.
+[[rules]]
+id = "adi-inline-dsn"
+description = "Cadena de conexión o credencial por defecto embebida en código PHP"
+regex = '''(?i)define\s*\(\s*['"][A-Z_]*(PASS|PASSWORD|USER|USERNAME)['"]\s*,[^)]*\?\?\s*['"][^'"]{3,}['"]'''
+tags = ["adi", "hardcoded"]
+
+# --- Qué NO es un hallazgo aquí --------------------------------------------------------------
+[allowlist]
+description = "Ruido conocido de este proyecto, revisado una a una"
+paths = [
+  # Semillas del propio laboratorio: contraseñas sintéticas que existen para poder auditar, y
+  # que son públicas a propósito (viven en un contenedor efímero atado a 127.0.0.1).
+  '''targets/adi/db-init/.*\.sql$''',
+  # vendor/ no es código de este equipo; sus secretos de ejemplo no son suyos.
+  '''(^|/)vendor/''',
+]
+regexes = [
+  # Declaraciones y usos de PHP: `public ?string $password;`, `$post['new_password']`,
+  # `password_hash(...)`. Son el código que gestiona credenciales, no credenciales.
+  '''\$[a-zA-Z_]*(password|token|secret)[a-zA-Z_]*''',
+  '''['"]?(new_|current_|confirm_)?password['"]?\s*(=>|\]|;|\))''',
+  '''password_(hash|verify|needs_rehash)\s*\(''',
+]

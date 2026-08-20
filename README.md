@@ -1,5 +1,10 @@
 # QA-harness — laboratorio de auditoría/QA multiproyecto
 
+> **¿Vas a auditar un proyecto?** Empieza por `make siguiente TARGET=<proyecto>`: mira el estado
+> real y dice el próximo paso. El porqué del método está en [`METODOLOGIA.md`](METODOLOGIA.md) —
+> qué aportas tú, qué procesa la herramienta y qué interpretas tú, que son tres partes distintas
+> y saltarse la primera o la tercera no da error.
+
 Audita **cualquier** proyecto con herramientas estándar, cada una con su configuración nativa. La
 orquestación es `docker compose` declarativo y un `Makefile` de objetivos 1:1.
 

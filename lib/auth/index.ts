@@ -189,6 +189,71 @@ const zajuna: AuthAdapter = {
   },
 };
 
+// ---- Plain PHP form login (session cookie, optionally a CSRF field) -------
+//
+// The factory's most repeated stack has no JSON login endpoint and no framework: a form is
+// POSTed, PHP calls session_start(), and a cookie comes back. Everything project-specific is
+// configuration rather than code, so this one adapter serves every such project.
+//
+//   LOGIN_PATH          form action (default /login)
+//   LOGIN_USER_FIELD    default "username"
+//   LOGIN_PASS_FIELD    default "password"
+//   LOGIN_CSRF_FIELD    optional hidden field to scrape from the form first
+//   LOGIN_FAIL_MARKER   text present in the body ONLY when login failed
+//   LOGIN_OK_MARKER     text present ONLY when it succeeded (preferred: see below)
+//
+// Deciding success is the whole difficulty. A PHP form login answers 200 whether it worked or
+// not — the failure page IS a page — so status codes prove nothing. Absent any marker, the
+// fallback is "did a session cookie appear", which is weak: some apps set one for anonymous
+// visitors too. State LOGIN_OK_MARKER in the profile and this stops being guesswork; without
+// it a failed login can be read as a success, and every authorization test then passes for the
+// wrong reason, which is the worst outcome this lab can produce.
+const phpForm: AuthAdapter = {
+  name: 'php-form',
+  async loginAs(role) {
+    const path = process.env.LOGIN_PATH || '/login';
+    const userField = process.env.LOGIN_USER_FIELD || 'username';
+    const passField = process.env.LOGIN_PASS_FIELD || 'password';
+    const csrfField = process.env.LOGIN_CSRF_FIELD || '';
+    const ctx = await newCtx();
+
+    const form: Record<string, string> = {
+      [userField]: CREDS[role].user,
+      [passField]: CREDS[role].pass,
+    };
+
+    if (csrfField) {
+      const page = await (await ctx.get(u(path))).text();
+      const re = new RegExp(`name=["']${csrfField}["'][^>]*value=["']([^"']+)["']`);
+      const token = re.exec(page)?.[1]
+        ?? new RegExp(`value=["']([^"']+)["'][^>]*name=["']${csrfField}["']`).exec(page)?.[1];
+      if (!token) throw new Error(`php-form: no se encontró el campo CSRF "${csrfField}" en ${path}`);
+      form[csrfField] = token;
+    }
+
+    const res = await ctx.post(u(path), { form, maxRedirects: 5 });
+    const body = await res.text();
+
+    const fail = process.env.LOGIN_FAIL_MARKER;
+    if (fail && body.includes(fail))
+      throw new Error(`php-form: login falló para el rol ${role} (apareció LOGIN_FAIL_MARKER)`);
+
+    const ok = process.env.LOGIN_OK_MARKER;
+    if (ok) {
+      if (!body.includes(ok))
+        throw new Error(`php-form: login falló para el rol ${role} (no apareció LOGIN_OK_MARKER)`);
+    } else {
+      const cookies = (await ctx.storageState()).cookies;
+      if (!cookies.some((c) => /^(PHPSESSID|.*session.*)$/i.test(c.name)))
+        throw new Error(`php-form: login falló para el rol ${role} (ninguna cookie de sesión)`);
+    }
+    return ctx;
+  },
+  async writeHeaders() {
+    return {};
+  },
+};
+
 // Unauthenticated. Legitimate for a public surface — but the authorization specs will
 // skip, and skipping must be visible in RUN.md rather than read as "passed".
 const none: AuthAdapter = {
@@ -205,6 +270,7 @@ const ADAPTERS: Record<string, AuthAdapter> = {
   sanctum,
   'moodle-session': moodleSession,
   'jwt-bearer': jwtBearer,
+  'php-form': phpForm,
   zajuna,
   basic,
   none,

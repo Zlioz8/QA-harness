@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Starting point for `make perf-jmeter`. Replace it with your team's real plan the moment you
+  have one — that is the whole reason JMeter is here: a .jmx authored in the GUI is often the
+  only executable description of a realistic journey a team owns, and rewriting it into another
+  tool's language would mean auditing the translation instead of the plan.
+
+  Everything that decides the SIZE of the load is a -J property, never a literal. The lab passes
+  users/ramp/loops from target.env so the run happens inside the declared envelope
+  (PERF_CPUS / PERF_MEM); numbers produced under an undeclared envelope are not comparable to
+  anything, including to themselves last week.
+
+  PATHS is a comma-separated list, so this file stays project-agnostic: point it at the screens
+  that matter and it needs no other edit.
+-->
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.5">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="seclab" enabled="true">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="base_url" elementType="Argument">
+            <stringProp name="Argument.name">base_url</stringProp>
+            <stringProp name="Argument.value">${__P(base_url,http://localhost:8080)}</stringProp>
+          </elementProp>
+          <elementProp name="paths" elementType="Argument">
+            <stringProp name="Argument.name">paths</stringProp>
+            <stringProp name="Argument.value">${__P(paths,/)}</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="usuarios" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" enabled="true">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <stringProp name="LoopController.loops">${__P(loops,5)}</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${__P(users,10)}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${__P(ramp,10)}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">false</boolProp>
+      </ThreadGroup>
+      <hashTree>
+        <!-- ForeachController does NOT split a string: it reads variables named path_1, path_2, …
+             so `paths` is expanded into exactly those. This has to live INSIDE the thread group:
+             in the Test Plan's own variables it runs before any thread exists and __split dies
+             with a bare NullPointerException that names only "compiling the tree".
+             Without the split the plan still completes — and reports zero samples. A green run
+             that measured nothing is the failure mode this whole lab exists to refuse. -->
+        <Arguments guiclass="ArgumentsPanel" testclass="Arguments" testname="expandir paths" enabled="true">
+          <collectionProp name="Arguments.arguments">
+            <elementProp name="split_paths" elementType="Argument">
+              <stringProp name="Argument.name">split_paths</stringProp>
+              <stringProp name="Argument.value">${__split(${paths},path)}</stringProp>
+              <stringProp name="Argument.metadata">=</stringProp>
+            </elementProp>
+          </collectionProp>
+        </Arguments>
+        <hashTree/>
+        <!-- One request per entry in `paths`; the CSV-less loop keeps the plan a single file. -->
+        <ForeachController guiclass="ForeachControlPanel" testclass="ForeachController" testname="por ruta" enabled="true">
+          <stringProp name="ForeachController.inputVal">path</stringProp>
+          <stringProp name="ForeachController.returnVal">p</stringProp>
+          <boolProp name="ForeachController.useSeparator">true</boolProp>
+        </ForeachController>
+        <hashTree>
+          <!-- The empty `HTTPsampler.Arguments` block is NOT optional filler: without it JMeter
+               dies with a bare NullPointerException while compiling the tree, naming nothing. -->
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="GET ${p}" enabled="true">
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments" guiclass="HTTPArgumentsPanel" testclass="Arguments" testname="params" enabled="true">
+              <collectionProp name="Arguments.arguments"/>
+            </elementProp>
+            <stringProp name="HTTPSampler.domain"></stringProp>
+            <stringProp name="HTTPSampler.port"></stringProp>
+            <stringProp name="HTTPSampler.protocol"></stringProp>
+            <stringProp name="HTTPSampler.contentEncoding"></stringProp>
+            <stringProp name="HTTPSampler.path">${base_url}${p}</stringProp>
+            <stringProp name="HTTPSampler.method">GET</stringProp>
+            <boolProp name="HTTPSampler.follow_redirects">true</boolProp>
+            <boolProp name="HTTPSampler.auto_redirects">false</boolProp>
+            <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+            <boolProp name="HTTPSampler.DO_MULTIPART_POST">false</boolProp>
+            <stringProp name="HTTPSampler.embedded_url_re"></stringProp>
+            <stringProp name="HTTPSampler.connect_timeout"></stringProp>
+            <stringProp name="HTTPSampler.response_timeout"></stringProp>
+          </HTTPSamplerProxy>
+          <hashTree/>
+        </hashTree>
+        <!-- Cookies matter: without this every thread is a fresh anonymous visitor and the plan
+             silently measures the login page instead of the application. -->
+        <CookieManager guiclass="CookiePanel" testclass="CookieManager" testname="cookies" enabled="true">
+          <collectionProp name="CookieManager.cookies"/>
+          <boolProp name="CookieManager.clearEachIteration">false</boolProp>
+          <boolProp name="CookieManager.controlledByThreadGroup">false</boolProp>
+        </CookieManager>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

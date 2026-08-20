@@ -37,7 +37,7 @@ guard:
 	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build \
 	          $(REPORTS)/api $(REPORTS)/mobile $(REPORTS)/device
 
-.PHONY: budget help list new detect doctor guard require-live require-auth clone up down purge status gate dashboard run-manifest doc-check ui ui-stop ui-logs \
+.PHONY: budget help list new siguiente guiones detect ingest-deploy doctor guard require-live require-auth clone up down purge status gate dashboard informe run-manifest doc-check ui ui-stop ui-logs \
         sonar qodana semgrep secrets deps config-scan image-scan sbom mobile-scan static \
         build dast perf perf-jmeter e2e device-e2e live all api-lint api-fuzz
 
@@ -61,8 +61,24 @@ list:             ##[admin] list target profiles
 new:              ##[admin] scaffold targets/$(TARGET) from the template
 	@tools/new-target.sh "$(TARGET)"
 
+siguiente:        ##[admin] ¿qué toca hacer AHORA con este proyecto? — empieza siempre por aquí
+	@# Mira el estado real en disco y dice el próximo paso concreto. Existe porque un
+	@# procedimiento escrito hay que acordarse de leerlo entero, y saltarse un paso no da error:
+	@# da un informe que parece completo. Ver la cabecera de tools/siguiente.py.
+	@LAB_DIR="$(CURDIR)" tools/siguiente.py "$(TARGET)" $(if $(TODO),--todo,)
+
+guiones:          ##[admin] ¿está cada herramienta aplicada a ESTE proyecto, o corre con el ejemplo?
+	@LAB_DIR="$(CURDIR)" tools/guion-check.py "$(TARGET)"
+
 detect:           ##[admin] sniff the source tree and propose target.env values
 	@tools/detect.sh "$(TARGET)"
+
+ingest-deploy: guard ##[code] trae el DEPLOY.md del equipo (dev, si no dev2) y contrasta el repositorio con lo que promete
+	@# El documento que se pidió a los desarrolladores no es solo documentación: es un conjunto de
+	@# afirmaciones sobre un repositorio, y un repositorio las respalda o no. Sin esto, un proyecto
+	@# cuyo manifiesto de dependencias está gitignored produce un escaneo de CVE vacío que parece
+	@# un resultado limpio.
+	@tools/ingest-deploy.sh "$(TARGET)"
 
 doctor: guard     ##[admin] preflight: docker, disk, free ports, reports permissions
 	@tools/doctor.sh "$(TARGET)"
@@ -265,6 +281,13 @@ run-manifest: guard ##[admin] write reports/$(TARGET)/RUN.md (commit, digests, e
 
 gate: guard       ##[admin] exit != 0 when the thresholds in target.env are breached
 	@tools/gate.sh "$(TARGET)"
+
+informe: guard    ##[admin] genera INFORME_TECNICO_VERIFICACION_R<n>_<PROYECTO>.md, el entregable al equipo
+	@# Sale completo en todo lo verificable (cobertura, conteos, IDs estables entre rondas, deuda
+	@# atribuida) y con marcas ⟨PENDIENTE⟩ donde hace falta una persona. Esas marcas son
+	@# deliberadamente feas: un informe con huecos visibles es honesto, uno que los rellena con
+	@# generalidades no. RONDA_NUEVA=1 abre la siguiente ronda; sin eso, regenera la actual.
+	@LAB_DIR="$(CURDIR)" tools/report.py "$(TARGET)" $(if $(RONDA_NUEVA),--ronda-nueva,)
 
 dashboard: guard  ##[admin] build reports/$(TARGET)/index.html — one readable page from every tool
 	@tools/dashboard.py "$(TARGET)"

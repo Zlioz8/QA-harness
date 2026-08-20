@@ -1,0 +1,69 @@
+# OWASP ZAP Automation Framework — adi.
+#
+# ZAP corre SIN AUTENTICAR. Lo que eso cubre, con precisión: cabeceras de seguridad, la
+# superficie del login, TLS, y todo lo que la aplicación expone sin sesión — que en ADI incluye
+# lo interesante, porque la auditoría manual y esta corrida ya confirmaron que /adi/.git/ y
+# /adi/sonar-project.properties.bak responden 200 a cualquiera.
+#
+# Lo que NO cubre: autorización. Un informe limpio aquí abajo NO es evidencia de que una cuenta
+# `support` no alcance lo que solo `super` debería. Esa pregunta es de la matriz de Playwright
+# (playwright/authz-matrix.json), que inicia sesión con dos cuentas de distinto privilegio.
+#
+# El objetivo es el entorno de VALIDACIÓN, declarado por el responsable de QA como apto para
+# escaneo activo. No apuntar esto a producción sin una ventana acordada por escrito.
+env:
+  contexts:
+    - name: adi
+      urls:
+        - "${APP_INTERNAL_URL}/adi"
+      includePaths:
+        - "${APP_INTERNAL_URL}/adi.*"
+      excludePaths:
+        # Cerrar nuestra propia sesión a mitad del escaneo lo deja sin cobertura autenticada.
+        - ".*/adi/logout.*"
+        # Ejecuta consultas de análisis contra newintegracion. Un escaneo activo sobre este
+        # endpoint dispara consultas pesadas repetidas contra un servidor compartido: eso es
+        # una prueba de carga no acordada, no un escaneo de seguridad.
+        - ".*/adi/analysis/query.*"
+  parameters:
+    failOnError: false      # el veredicto lo da `make gate`, no el código de salida de la herramienta
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: spider
+    parameters:
+      context: adi
+      url: "${APP_INTERNAL_URL}/adi/"
+      maxDuration: 3
+
+  # El router de ADI hace coincidencia EXACTA de URI (app/Core/Router.php): no hay rutas con
+  # parámetros que un crawler pueda descubrir recorriendo enlaces, y varias pantallas solo se
+  # alcanzan desde el menú una vez autenticado. Sin esta lista, la mitad de la superficie
+  # simplemente no aparece en el escaneo y nadie lo nota.
+  - type: import
+    parameters:
+      type: url
+      fileName: /zap/wrk/zap/urls.txt
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  - type: activeScan
+    parameters:
+      context: adi
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 10
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.json
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.html

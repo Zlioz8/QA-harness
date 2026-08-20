@@ -1,0 +1,182 @@
+[
+  {
+    "path": "/adi/users",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "RoleMiddleware index => [super, support]. Both roles may LIST users; only super may change them (below)."
+  },
+  {
+    "path": "/adi/users/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "RoleMiddleware store => [super]. Creating a user is the classic privilege-escalation route: a support account that reaches this can mint itself a super."
+  },
+  {
+    "path": "/adi/users/update",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "RoleMiddleware update => [super]. Includes the role column, so a support account reaching this can promote itself."
+  },
+  {
+    "path": "/adi/users/delete",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "RoleMiddleware delete => [super]"
+  },
+  {
+    "path": "/adi/server",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "RoleMiddleware index => [super, support]"
+  },
+  {
+    "path": "/adi/server/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "RoleMiddleware store => [super]. Writes server connection settings."
+  },
+  {
+    "path": "/adi/batch",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "RoleMiddleware index => [super, support]"
+  },
+  {
+    "path": "/adi/batch/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "RoleMiddleware store => [super]"
+  },
+  {
+    "path": "/adi/batch/store-notifications-target",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "RoleMiddleware storeNotificationsTarget => [super]"
+  },
+  {
+    "path": "/adi/batch/delete-notifications-target",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "RoleMiddleware deleteNotificationsTarget => [super]"
+  },
+  {
+    "path": "/adi/scripts",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "CronScriptController index => [super, support]"
+  },
+  {
+    "path": "/adi/scripts/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "CronScriptController store => [super]. These scripts run over SSH on the cron server (phpseclib): reaching this is remote command execution on another host, the highest-impact endpoint in the application."
+  },
+  {
+    "path": "/adi/scripts/update",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "CronScriptController update => [super]. Same impact as store."
+  },
+  {
+    "path": "/adi/scripts/delete",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "CronScriptController delete => [super]"
+  },
+  {
+    "path": "/adi/josso",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "JossoController index => [super, support]"
+  },
+  {
+    "path": "/adi/josso/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "JossoController store => [super]"
+  },
+  {
+    "path": "/adi/notes",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "NoteController index => [super, support]"
+  },
+  {
+    "path": "/adi/notes/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "NoteController store => [super]"
+  },
+  {
+    "path": "/adi/api",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "ApiController index => [super, support]"
+  },
+  {
+    "path": "/adi/api/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "ApiController store => [super]. Stores external API connection settings, credentials included."
+  },
+  {
+    "path": "/adi/api/export",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "ApiController export => [super, support]"
+  },
+  {
+    "path": "/adi/events",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "EventController index => [super, support]"
+  },
+  {
+    "path": "/adi/events/export",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "EventController export => [super, support]"
+  },
+  {
+    "path": "/adi/seeds/store",
+    "method": "POST",
+    "allow": ["A"],
+    "note": "SeedController store => [super]. NOTE: its 'index' is declared as [] — an EMPTY array, which RoleMiddleware treats as no restriction at all, so /adi/seeds is readable by any authenticated user while every other listing screen is limited to super+support. Deliberate or an oversight, it is a discrepancy worth asking the team about; it is asserted below rather than assumed."
+  },
+  {
+    "path": "/adi/seeds",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "SeedController index => [] (no restriction). Encoded as allow-both to match the code as written. If the team intends seeds to be super-only, this line is the finding, not the test."
+  },
+  {
+    "path": "/adi/home",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "DashboardController registers no RoleMiddleware: any authenticated user."
+  },
+  {
+    "path": "/adi/analysis",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "AnalysisController registers NO RoleMiddleware, so any authenticated user reaches the query console. Encoded as the code behaves; whether that is intended is a question for the team, and it is the single most interesting one in this matrix — /adi/analysis/query executes stored SQL."
+  },
+  {
+    "path": "/adi/analysis/query",
+    "method": "POST",
+    "allow": ["A", "B"],
+    "note": "AnalysisController has no RoleMiddleware. Executes analysis queries against newintegracion. Same question as above, with more impact."
+  },
+  {
+    "path": "/adi/logs",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "LogController registers no RoleMiddleware: any authenticated user reads the audit log."
+  },
+  {
+    "path": "/adi/logs/export",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "LogController export, no RoleMiddleware."
+  }
+]

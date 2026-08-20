@@ -203,6 +203,23 @@ fi
 mkdir -p "reports/$TARGET" 2>/dev/null
 [ -w "reports/$TARGET" ] && ok "reports/$TARGET writable" || bad "reports/$TARGET not writable"
 
+# --- ¿está cada herramienta aplicada a ESTE proyecto? ---------------------------------------
+#
+# El guion es el techo de la cobertura: una dimensión no encuentra nada fuera de lo que su guion
+# ejercita. Correr con el ejemplo de la plantilla no es media medición, es la medición de otro
+# proyecto con el nombre de este. Aquí se AVISA (aún se está a tiempo); `make gate` lo convierte
+# en veredicto cuando ya hay artefactos en disco.
+if [ -x tools/guion-check.py ]; then
+  GUION_OUT=$(LAB_DIR="$PWD" tools/guion-check.py "$TARGET" 2>/dev/null)
+  GUION_MAL=$(echo "$GUION_OUT" | grep -cE '^  (ERROR|aviso) ')
+  if [ "${GUION_MAL:-0}" -gt 0 ]; then
+    warn "$GUION_MAL dimensión(es) con guion genérico o ausente — 'tools/guion-check.py $TARGET'"
+    echo "$GUION_OUT" | grep -E '^  (ERROR|aviso) ' | sed 's/^/        /'
+  else
+    ok "todas las dimensiones con guion lo tienen escrito para este proyecto"
+  fi
+fi
+
 # --- which rung of the ladder, and what that leaves blocked ---------------------------------
 echo
 TIER_OUT=$(tools/tier.sh "$TARGET" 2>/dev/null)

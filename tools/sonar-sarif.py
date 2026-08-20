@@ -13,7 +13,9 @@ Usage: sonar-sarif.py <reports_dir>/sonar
 """
 from __future__ import annotations
 
+import glob
 import json
+import re
 import os
 import sys
 
@@ -30,6 +32,42 @@ def read(path: str):
             return json.load(fh)
     except (OSError, ValueError):
         return None
+
+
+def read_paginado(d: str, prefijo: str, clave: str):
+    """Une TODAS las páginas que descargó sonar-export, no solo la primera.
+
+    `ps=500` es el máximo de la API de SonarQube, no «todos». Este conversor leía únicamente
+    issues.json —la página 1— así que sobre adi convertía 500 de 736 issues y los 236 restantes
+    no llegaban ni al SARIF, ni al gate, ni al informe. Con MAX_QUALITY_FINDINGS=500 el
+    veredicto acababa comparando el tamaño de página contra el presupuesto.
+
+    Se declara el total que dice la API para que un truncamiento futuro se vea, en vez de
+    volver a perderse en silencio.
+    """
+    paginas = sorted(glob.glob(os.path.join(d, f"{prefijo}-p*.json")),
+                     key=lambda f: int(re.search(r"-p(\d+)\.json$", f).group(1)))
+    if not paginas:
+        return read(os.path.join(d, f"{prefijo}.json"))
+    fusion, total = None, 0
+    for f in paginas:
+        pag = read(f)
+        if pag is None:
+            continue
+        total = pag.get("total") or (pag.get("paging") or {}).get("total") or total
+        if fusion is None:
+            fusion = pag
+        else:
+            fusion[clave] = (fusion.get(clave) or []) + (pag.get(clave) or [])
+    if fusion is not None:
+        n = len(fusion.get(clave) or [])
+        print(f"sonar: {prefijo} — {n} de {total} declarados por la API "
+              f"({len(paginas)} página(s))", file=sys.stderr)
+        if total and n < total:
+            print(f"sonar: AVISO {prefijo} TRUNCADO: faltan {total - n}. "
+                  f"El conteo que llegue al veredicto NO es la medida completa.",
+                  file=sys.stderr)
+    return fusion
 
 
 def _result(rule, sev, msg, comp, line):
@@ -57,8 +95,8 @@ def main() -> int:
         print("usage: sonar-sarif.py <sonar reports dir>", file=sys.stderr)
         return 2
     d = sys.argv[1]
-    issues = read(os.path.join(d, "issues.json"))
-    hotspots = read(os.path.join(d, "hotspots.json"))
+    issues = read_paginado(d, "issues", "issues")
+    hotspots = read_paginado(d, "hotspots", "hotspots")
     if issues is None and hotspots is None:
         print("sonar: nothing exported — not writing a SARIF "
               "(an absent file means NOT RUN; an empty one would mean 'clean')", file=sys.stderr)

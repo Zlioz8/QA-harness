@@ -16,10 +16,31 @@ set -uo pipefail
 TARGET="${1:?usage: secrets.sh <target>}"
 ENVFILE="targets/$TARGET/target.env"
 REPORTS="reports/$TARGET"
-DC="docker compose --env-file $ENVFILE -f docker-compose.yml"
-envget() { sed -n "s/^${1}=//p" "$ENVFILE" 2>/dev/null | tail -1 \
-  | sed -E 's/[[:space:]]+#.*$//; s/^[[:space:]]+//; s/[[:space:]]+$//; s/^"//; s/"$//'; }
+# Un solo lector del perfil, y los DOS --env-file.
+#
+# Este archivo llevaba su propia copia de envget — la misma que lib-env.sh existe para que no se
+# repita — y esa copia se quedó atrás cuando envget aprendió el override target.env.local. El
+# perfil dice ahora que los valores que no salen de la máquina viven ahí, así que un SRC_PATH
+# puesto en el .local era invisible EXACTAMENTE aquí: SRC_PATH salía vacío, docker rechazaba el
+# montaje ":/repo:ro", gitleaks no llegaba a arrancar, y el merge de más abajo escribía un
+# informe limpio igualmente. Medido sobre adi, un repositorio que tiene un token de SonarQube
+# commiteado: la corrida dijo "0 secretos".
+#
+# Y el mismo desacuerdo en compose: el Makefile pasa los dos --env-file y este script solo uno,
+# de modo que las herramientas y el contenedor leían perfiles distintos del mismo target.
+. "$(dirname "$0")/lib-env.sh"
+ENVLOCAL=""
+[ -f "$ENVFILE.local" ] && ENVLOCAL="--env-file $ENVFILE.local"
+DC="docker compose --env-file $ENVFILE $ENVLOCAL -f docker-compose.yml"
 SRC_PATH="$(envget SRC_PATH)"
+
+# Fallar ruidosamente antes que escanear nada. Sin esto la corrida sigue, produce un informe
+# vacío y el gate estampa PASS sobre un repositorio que nadie miró.
+[ -n "$SRC_PATH" ] && [ -d "$SRC_PATH" ] || {
+  echo "secrets: SRC_PATH no resuelve a un directorio: '${SRC_PATH:-<vacío>}'"
+  echo "         Revísalo en $ENVFILE (o en $ENVFILE.local, que gana sobre él)."
+  exit 2
+}
 
 GL_ARGS="--report-format sarif --exit-code 0 --redact --config /config/gitleaks.toml"
 
@@ -71,9 +92,20 @@ for f in parts:
     if base is None:
         base = d
 if base is None:
-    base = {"version": "2.1.0",
-            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-            "runs": [{"tool": {"driver": {"name": "gitleaks", "rules": []}}, "results": []}]}
+    # NO es un resultado limpio: no corrió nada. Escribir aquí un SARIF vacío pero válido es lo
+    # más peligroso que puede hacer este script — gate.sh cuenta ruleIds sobre un archivo que
+    # EXISTE, ve cero y estampa "PASS secretos: 0". Un escaneo que nunca ocurrió se convierte en
+    # una aprobación, que es precisamente el modo de fallo contra el que está escrito todo este
+    # laboratorio.
+    #
+    # Dejar el archivo AUSENTE hace que sarif_count devuelva -1, y el gate ya sabe decir
+    # "gitleaks not run". La ausencia de un escaneo no puede parecerse a la ausencia de
+    # hallazgos.
+    print("secrets: ningún pase produjo resultados — NO se escribe gitleaks.sarif.")
+    print("         La dimensión queda NO EJECUTADA, que no es lo mismo que «sin hallazgos».")
+    for f in parts:
+        os.remove(f)
+    sys.exit(3)
 base["runs"][0]["results"] = results
 json.dump(base, open(os.path.join(rep, "gitleaks.sarif"), "w"), indent=2)
 for f in parts:

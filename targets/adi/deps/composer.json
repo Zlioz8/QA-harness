@@ -1,0 +1,20 @@
+{
+    "_comment": "RECONSTRUCCION DEL LABORATORIO, no el composer.json del equipo. El del repositorio esta en .gitignore (hallazgo D1 del contrato de despliegue). Reconstruido desde DEPLOY.md seccion 4 y docs/AUDITORIA_2026-07-30.md seccion 1.2. La dimension CVE de dependencias es NO AUTORITATIVA mientras este archivo este en uso. Ver README.md en este directorio.",
+    "name": "fabrica-zajuna/adi",
+    "description": "Reconstruccion de laboratorio para poder levantar ADI y auditarlo. NO es el manifiesto del proyecto.",
+    "type": "project",
+    "require": {
+        "php": "^8.0",
+        "vlucas/phpdotenv": "^5.6",
+        "phpoffice/phpspreadsheet": "^5.8",
+        "phpseclib/phpseclib": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

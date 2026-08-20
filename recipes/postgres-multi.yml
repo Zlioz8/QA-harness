@@ -1,0 +1,52 @@
+# RECIPE: PostgreSQL with SEVERAL databases in one server, ephemeral.
+#
+# recipes/postgres.yml creates exactly one database, which covers most projects. It does not
+# cover the ones whose configuration names five — ADI reads adi_db, newintegracion,
+# dbadireporte, Presencialformacion and resultadoscalificaciones from a single server, and four
+# of the five only ever hold restored data. Pointing them all at one database does not fail
+# loudly: the modules render empty and the audit reports "no findings" over a page that was
+# never wired to anything.
+#
+# Use postgres.yml when there is one database. Use this when there is more than one.
+#
+# Reads from target.env:
+#   DB_NAMES     comma-separated. The FIRST is POSTGRES_DB (the one the entrypoint creates).
+#   DB_USER DB_PASSWORD DB_IMAGE TARGET_NAME
+#   MIGRATIONS_SUBDIR  optional: directory of the CHECKOUT holding .sql migrations, mounted
+#                      read-only at /migrations for the profile's seeds to include
+services:
+  db:
+    profiles: ["runtime", "dast", "perf", "e2e", "prod"]
+    image: ${DB_IMAGE:-postgres:16}
+    environment:
+      # The entrypoint creates only this one; 00-databases.sh below creates the rest. Splitting
+      # it this way keeps pg_isready meaningful — it needs a database that exists at boot.
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      DB_NAMES: ${DB_NAMES}
+    volumes:
+      # Ordered by filename: postgres runs /docker-entrypoint-initdb.d/* alphabetically, so the
+      # database-creation script has to sort BEFORE the profile's own seeds. Hence 00-.
+      - ./postgres-multi/00-databases.sh:/docker-entrypoint-initdb.d/00-databases.sh:ro
+      # PATH SEMANTICS, the subtlest trap in this lab: `include:` resolves the path OF the
+      # included file against the project directory, but paths INSIDE it against the included
+      # file's own directory. So this is ../targets/..., not ./targets/... . Get it wrong and
+      # Docker creates an empty directory and mounts that — the seed silently never runs, the
+      # database comes up empty, and every later result is quietly wrong.
+      - ../targets/${TARGET_NAME}/db-init:/docker-entrypoint-initdb.d/seed:ro
+      # The project's OWN migrations, read-only, so a seed can `\i /migrations/001_....sql`
+      # rather than the profile keeping a copy that goes stale the moment the team adds one.
+      # Points at the checkout itself; harmless when the project has no migrations directory.
+      - ${SRC_PATH}/${MIGRATIONS_SUBDIR:-.}:/migrations:ro
+    healthcheck:
+      # Gate on the LAST database in the list, not on pg_isready alone: the server accepts
+      # connections long before 00-databases.sh has finished, and `depends_on: service_healthy`
+      # would then release the application against a half-built server.
+      test: ["CMD-SHELL", "psql -U $${POSTGRES_USER} -lqt | cut -d'|' -f1 | grep -qw \"$$(echo $${DB_NAMES} | tr ',' '\\n' | tail -1 | tr -d ' ')\""]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+    # Not published: nothing outside the compose network needs the database, and publishing it
+    # is how an audit lab ends up serving real data to the LAN (finding L1).

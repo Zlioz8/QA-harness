@@ -43,3 +43,13 @@ targets/*/target.env.local
 # is versioned, so which baseline a run used stays reviewable.
 baselines/*/*.dump
 baselines/*/*.tar.zst
+
+# Workspace efímero del navegador MCP: snapshots, logs de consola y red de cada sesión.
+# Se regeneran en cada validación por flujo; no son parte del lab.
+.playwright-mcp/
+# Locks temporales de LibreOffice/Excel.
+.~*.xlsx
+# La lista de prioridad lleva nombres de desarrolladores: insumo interno, no va al repo.
+Lista de prioridad - QA.xlsx
+# Informes sueltos en la raíz: entregables, viven bajo reports/ (ya ignorado) o se entregan aparte.
+INFORME_TECNICO_VERIFICACION_R*_*.md

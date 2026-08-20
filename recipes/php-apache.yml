@@ -1,0 +1,58 @@
+# RECIPE: plain PHP served by Apache with mod_php — the factory's most repeated stack.
+#
+# For projects that are NOT a framework: an index.php at the root, routing done by .htaccess and
+# mod_rewrite, PHP executed inside the Apache process. No build step, no Node, no reverse proxy.
+# ADI is the first of these; detection used to fall straight through the stack and report
+# "no recipe", which reads as "nothing to run" when in fact everything is there.
+#
+# Reads from target.env:
+#   PHP_IMAGE      base image (default php:8.2-apache — match the version production runs)
+#   PHP_EXTS       space-separated extensions to compile in
+#   APP_SUBDIR     subdirectory of SRC_PATH holding the app (default: the whole checkout)
+#   SRC_DIRECTORY  URL prefix the app is served under, e.g. /adi. MUST match what the app's own
+#                  configuration says, or the pages load without styles and nothing responds.
+#   APP_PORT       host port, bound to 127.0.0.1
+#   DB_HOST_VARS   comma-separated .env variables to point at the compose database host
+#   ENV_OVERRIDES  semicolon-separated KEY=VALUE written into the app's .env (credentials,
+#                  database names — whatever the project's template leaves blank)
+services:
+  app:
+    profiles: ["runtime", "dast", "perf", "e2e", "prod"]
+    build:
+      context: ./php-apache
+      args:
+        PHP_IMAGE: ${PHP_IMAGE:-php:8.2-apache}
+        PHP_EXTS: ${PHP_EXTS:-pdo_pgsql pgsql gd zip intl soap}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SRC_DIRECTORY: ${SRC_DIRECTORY:-}
+      APP_SUBDIR: ${APP_SUBDIR:-}
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_HOST_VARS: ${DB_HOST_VARS:-}
+      ENV_OVERRIDES: ${ENV_OVERRIDES:-}
+    volumes:
+      # READ-ONLY, without exception: the lab observes, it never modifies the audited project.
+      # The entrypoint copies this tree into a container-local path before anything writes to
+      # it (composer, cache, session files), exactly as recipes/README.md requires.
+      - ${SRC_PATH}:/src:ro
+      # Inputs the repository does not carry but the deployment needs. For ADI that is
+      # composer.json/lock, which are gitignored upstream — the deployment-contract finding.
+      # Mounted, never invented: if the directory is absent the entrypoint says so and the
+      # dependency-CVE dimension is recorded as NOT AUTHORITATIVE rather than silently zero.
+      - ../targets/${TARGET_NAME}/deps:/deps:ro
+    ports:
+      - "127.0.0.1:${APP_PORT:-8090}:80"
+    healthcheck:
+      # The app's real entry path, not a /health this stack does not have. Inventing one would
+      # make require-live abort every live goal against a perfectly healthy deployment.
+      test: ["CMD-SHELL", "curl -fsS http://localhost${SRC_DIRECTORY:-}/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s

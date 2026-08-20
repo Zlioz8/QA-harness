@@ -1,0 +1,20 @@
+# ADI, rung 3: the lab brings the application up itself, ephemeral, from the checkout.
+#
+# Two recipes and nothing project-specific here — everything ADI needs is expressed as values
+# in target.env, which is what keeps php-apache and postgres-multi reusable by the next PHP
+# project in the factory (and most of them are).
+#
+# Paths resolve against the PROJECT directory (the lab root), not against this file.
+include:
+  - path: ./recipes/postgres-multi.yml
+  - path: ./recipes/php-apache.yml
+
+# What this profile does NOT bring up, deliberately:
+#
+#   Oracle SOFIA  — SOFIA_ENGINE=pgsql is the documented default and reads replicated views
+#                   from newintegracion instead, so no Oracle is required. The `oracle` engine
+#                   is therefore NOT COVERED by this profile.
+#   The cron SSH server — CRONJOB_* is optional; the module that uses it is exercised only as
+#                   far as its authorization boundary, which is the part that matters here and
+#                   is also the highest-impact endpoint in the app (remote command execution).
+services: {}

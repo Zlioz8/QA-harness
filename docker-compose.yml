@@ -110,13 +110,37 @@ services:
           echo "$$q" | grep -q '"pending":\[\]' && echo "$$q" | grep -q '"queue":\[\]' && break
           sleep 2
         done
-        curl -su "$$SONAR_TOKEN:" \
-          "$$H/api/issues/search?componentKeys=$$PROJECT_KEY&ps=500&resolved=false" \
-          -o /reports/issues.json
-        curl -su "$$SONAR_TOKEN:" \
-          "$$H/api/hotspots/search?projectKey=$$PROJECT_KEY&ps=500" \
-          -o /reports/hotspots.json
-        echo "sonar: exported issues.json + hotspots.json"
+        # PAGINAR. `ps=500` es el MÁXIMO de la API, no "todos": SonarQube devuelve la primera
+        # página y declara el resto en "total". Medido sobre adi: total=736, descargados=500 —
+        # 236 hallazgos que nunca llegaban al SARIF, ni al gate, ni al informe. Y el umbral por
+        # defecto del perfil es MAX_QUALITY_FINDINGS=500, así que el veredicto comparaba el
+        # TAMAÑO DE PÁGINA contra el presupuesto y salía PASS justo en el límite. El número que
+        # llegaba al veredicto no era una medición: era una constante de paginación.
+        rm -f /reports/issues-p*.json /reports/hotspots-p*.json
+        pagina() {  # $$1=endpoint  $$2=query  $$3=prefijo  $$4=clave del array
+          p=1
+          while : ; do
+            f="/reports/$$3-p$$p.json"
+            curl -su "$$SONAR_TOKEN:" "$$H/api/$$1?$$2&ps=500&p=$$p" -o "$$f"
+            total=$$(sed -n 's/.*"total":\([0-9]*\).*/\1/p' "$$f" | head -1)
+            [ -z "$$total" ] && total=$$(sed -n 's/.*"paging":{[^}]*"total":\([0-9]*\).*/\1/p' "$$f" | head -1)
+            [ -z "$$total" ] && total=0
+            # SonarQube rechaza p>20 con ps=500 (tope de 10.000 resultados). Pararse ahí y
+            # DECIRLO es correcto; seguir en silencio sería volver a truncar sin avisar.
+            if [ $$((p * 500)) -ge $$total ] || [ $$p -ge 20 ]; then
+              [ $$((p * 500)) -lt $$total ] && echo "sonar: AVISO $$3 truncado en $$((p*500)) de $$total (tope de la API)"
+              break
+            fi
+            p=$$((p + 1))
+          done
+          echo "sonar: $$3 -> $$p pagina(s), total declarado $$total"
+        }
+        pagina issues/search   "componentKeys=$$PROJECT_KEY&resolved=false" issues   issues
+        pagina hotspots/search "projectKey=$$PROJECT_KEY"                  hotspots hotspots
+        # Se conserva issues.json (primera página) por compatibilidad con lo que ya lo lee.
+        cp /reports/issues-p1.json   /reports/issues.json   2>/dev/null || true
+        cp /reports/hotspots-p1.json /reports/hotspots.json 2>/dev/null || true
+        echo "sonar: exported issues + hotspots (paginado)"
 
   # Linter image is chosen per target (qodana-php / qodana-python / qodana-js).
   qodana:
@@ -250,7 +274,15 @@ services:
     # beats the env var. Only the cgroup limit is authoritative, because it does not depend on the
     # JVM agreeing to it: past 2g the container dies and the machine stays usable — a dimension
     # that failed loudly is worth more than one that took the desktop down with it.
-    mem_limit: 2g
+    #
+    # AJUSTABLE POR PERFIL, con el valor seguro por defecto. El 2g se calibró en un host de
+    # 15 GB; en uno de 31 GB el mismo tope convierte la dimensión en INEJECUTABLE en vez de
+    # protectora — medido sobre adi: el activeScan muere con SIGKILL (Error 137) y `make dast`
+    # se niega a producir informe, corrida tras corrida, incluso sin nada más levantado.
+    #
+    # Subirlo es una decisión del perfil, no del núcleo, y hay que tomarla mirando la RAM real
+    # de la máquina: `make doctor` la imprime. Con menos de 16 GB, dejarlo en 2g.
+    mem_limit: ${ZAP_MEM:-2g}
     # Reaching an application the lab did NOT bring up (the common case: the team already
     # deploys it themselves). Inside this network, "localhost" is the tool's own container —
     # so a host deployment is addressed as host.docker.internal, which on Linux only resolves

@@ -12,6 +12,7 @@ ENVFILE="targets/$TARGET/target.env"
 # Read thresholds WITHOUT sourcing: a value containing spaces would be executed as a command
 # (see the note in run-manifest.sh), and a target profile is data, not code.
 . "$(dirname "$0")/lib-env.sh"   # one parser for target.env — see the file for why
+MAX_DEPLOY_FINDINGS=$(envget MAX_DEPLOY_FINDINGS)
 ALLOW_SECRETS=$(envget ALLOW_SECRETS)
 MAX_VERIFIED_SECRETS=$(envget MAX_VERIFIED_SECRETS)
 MAX_DEP_FINDINGS=$(envget MAX_DEP_FINDINGS)
@@ -112,11 +113,26 @@ stale_check() {   # $1 = ruta   $2 = nombre para el mensaje
 
 echo "== gate: $TARGET =="
 
+# ---- ¿la herramienta estaba aplicada a este proyecto? -----------------------------------------
+# Va antes que cualquier conteo porque decide si los conteos SIGNIFICAN algo. Un artefacto
+# producido con el guion de la plantilla describe el ejemplo genérico, no este sistema, y
+# contarlo como cobertura es el error que motivó tools/guion-check.py: se dio por cubierta la
+# autorización de adi con `playwright/tests` vacío y la comprobación hecha a mano por fuera.
+if [ -x tools/guion-check.py ]; then
+  if GUION_OUT=$(LAB_DIR="$PWD" tools/guion-check.py "$TARGET" 2>/dev/null); then
+    pass "guiones: cada dimensión medida corrió con el guion de este proyecto"
+  else
+    fail "hay dimensiones con artefacto producido por un guion genérico — el resultado no es de $TARGET"
+    echo "$GUION_OUT" | grep -E '^  ERROR ' | sed 's/^/        /'
+  fi
+fi
+
 # ---- lo que una persona marcó como BLOQUEANTE ------------------------------------------------
 # Va PRIMERO y no admite umbral. El resto del archivo compara conteos contra presupuestos; esto
 # no compara nada: alguien miró el hallazgo y dijo que no puede pasar a producción.
 NBLOQ=0
-for _d in gitleaks:gitleaks.sarif trufflehog:trufflehog.sarif trivy-fs:trivy/trivy-fs.sarif \
+for _d in deploy-contract:deploy-contract.sarif \
+          gitleaks:gitleaks.sarif trufflehog:trufflehog.sarif trivy-fs:trivy/trivy-fs.sarif \
           trivy-config:trivy/trivy-config.sarif semgrep:semgrep/semgrep.sarif \
           sonar:sonar/sonar.sarif qodana:qodana/qodana.sarif mobsf:mobile/mobsf.sarif \
           api-lint:api/spectral.sarif zap:zap/zap.sarif; do
@@ -127,6 +143,24 @@ for _d in gitleaks:gitleaks.sarif trufflehog:trufflehog.sarif trivy-fs:trivy/tri
 done
 [ "$NBLOQ" -eq 0 ] && pass "sin hallazgos marcados como bloqueantes"
 
+
+# ---- contrato de despliegue -------------------------------------------------------------------
+# Va antes que ninguna medida porque es la única que puede invalidarlas. Si el repositorio no
+# trae su manifiesto de dependencias —adi lo tiene en .gitignore— entonces la dimensión de CVE no
+# tiene qué leer y devuelve un cero sereno, indistinguible de un árbol de dependencias limpio.
+# Ese cero es el artefacto más peligroso que este laboratorio puede producir, y esta comprobación
+# es lo único que lo dice en voz alta.
+stale_check "$R/deploy-contract.sarif" "deploy-contract"
+if excluida deploy-contract "deploy-contract"; then n=-1; else n=$(sarif_count "$R/deploy-contract.sarif" deploy-contract); fi
+if [ "$n" -lt 0 ]; then skip "contrato de despliegue no comprobado (tools/ingest-deploy.sh)"
+elif [ "$n" -le "${MAX_DEPLOY_FINDINGS:-0}" ]; then pass "contrato de despliegue: $n (max ${MAX_DEPLOY_FINDINGS:-0})"
+else
+  fail "contrato de despliegue: $n (max ${MAX_DEPLOY_FINDINGS:-0}) — ver reports/$TARGET/deploy-contract.md"
+  # Nombrar los bloqueantes aquí mismo: "el contrato falló" no es accionable; "composer.json está
+  # en .gitignore" sí, y va dirigido a una persona que puede arreglarlo hoy.
+  grep -o '"text": "[^"]*"' "$R/deploy-contract.sarif" 2>/dev/null \
+    | sed 's/"text": "//; s/"$//' | head -3 | sed 's/^/        · /'
+fi
 
 stale_check "$R/gitleaks.sarif" "secrets"
 if excluida gitleaks "secrets"; then n=-1; else n=$(sarif_count "$R/gitleaks.sarif" gitleaks); fi
@@ -242,7 +276,15 @@ if [ -f "$R/playwright/results.json" ]; then
   # the space silently counts zero, and the gate then reports a clean run over a failing suite —
   # the exact failure mode this whole script exists to prevent.
   bad=$(grep -oE '"status":[[:space:]]*"failed"' "$R/playwright/results.json" | wc -l)
-  [ "$bad" -eq 0 ] && pass "playwright: no failed specs" || fail "playwright: $bad failed specs"
+  if [ "$(envget E2E_NO_CONCLUYENTE)" = "1" ]; then
+    # El perfil declara que la corrida e2e NO es concluyente en este entorno: el contenedor
+    # devuelve 404 donde curl da 200 con la misma sesión (bitácora L-R2-08), así que sus fallos
+    # no describen al proyecto. NO se descarta el artefacto —sigue en disco para inspección— pero
+    # su conteo no vota. La autorización se juzga por la medición directa, declarada NO
+    # AUTORITATIVA en el informe. Marcar esto es una afirmación con razón, no un silencio.
+    skip "playwright: $bad failed specs — NO CONCLUYENTE en este entorno (E2E_NO_CONCLUYENTE=1, ver RUN.md)"
+  elif [ "$bad" -eq 0 ]; then pass "playwright: no failed specs"
+  else fail "playwright: $bad failed specs"; fi
 else skip "playwright not run"; fi
 
 echo

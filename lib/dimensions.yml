@@ -68,6 +68,28 @@
 
 # ---------------------------------------------------------------- secretos
 
+- id: deploy-contract
+  label: Contrato de despliegue
+  tool: ingest-deploy
+  goal: ingest-deploy
+  service: 
+  profile: 
+  kind: findings
+  artifact: deploy-contract.sarif
+  inputs: REPO_URL|SRC_PATH
+  script: DEPLOY.md
+  script_kind: config
+  object: 
+  gate: MAX_DEPLOY_FINDINGS
+  default: 0
+  live: false
+  triage: true
+  class: light
+  mem: 256m
+  measured: true
+  needs: source
+  runner: local
+
 - id: gitleaks
   label: Secretos en la historia git
   tool: gitleaks
