@@ -1,17 +1,109 @@
-# gitleaks config — EXTEND the default ruleset, never replace it.
-# The defaults already catch generic API keys, AWS credentials, private keys, JWTs.
+# gitleaks — anuncios_de_plataforma (local_slider + local_slider_form)
+#
+# POR QUÉ ESTE ARCHIVO NO ES EL DE LA PLANTILLA.
+# La regla genérica `env-assigned-secret` produjo 13 hallazgos sobre este repositorio y los 13
+# son ruido, comprobados uno a uno:
+#
+#   · classes/external/ZajunaDbConnection.php:25  →  `$password = $CFG->dbpass;`
+#     Código que MANEJA una credencial. Es además el diseño correcto del plugin.
+#   · ajax/preview_correo.php:13                  →  la palabra «token» dentro de un COMENTARIO
+#     («lo almacena bajo un token aleatorio»).
+#   · segmented.php:1488                          →  declaraciones `const dcl… = new Dropdown…`
+#   · docs/DESPLIEGUE_PREPROD.md:52,63,67,118     →  MARCADORES de posición, verificados:
+#     `<…>` (31 car.), `…`, `LA_CLAVE_DE_PREPROD`. Ningún valor concreto.
+#
+# Ese ruido no es inocuo: entierra lo que sí importaría. Y lo que importa en ESTE proyecto tiene
+# una forma muy concreta, que sale de leer su código y su propia documentación.
+#
+# QUÉ FORMA TIENE UN SECRETO DE VERDAD AQUÍ.
+# El plugin NO tiene configuración propia: `ZajunaDbConnection` reutiliza `$CFG->dbhost/dbname/
+# dbuser/dbpass` de Moodle (DEPLOY.md §2.2: «no hay credenciales propias, ni fichero de
+# configuración aparte, ni contraseña embebida»). No hay `.env`, ni `composer.json`, ni SMTP —
+# el plugin no envía correo, sólo encola en `midb.envios2`.
+#
+# Por tanto el riesgo real es UNA regresión concreta, y está documentada por el propio equipo:
+# `docs/DESPLIEGUE_PREPROD.md` instruye a **sustituir la línea 20 de ZajunaDbConnection.php por
+# la clave literal de postgres de pre-producción**. Si alguien sigue ese documento y commitea,
+# la contraseña de la base entra en la historia de git. Ese es el hallazgo que este archivo
+# existe para atrapar, y por eso la regla `pg-password-literal` es la primera.
+
 [extend]
 useDefault = true
 
-# Generic: any password/secret/token assigned in a committed env-style file. Broad on
-# purpose — a false positive costs a glance, a missed credential costs a rotation.
+# ---------------------------------------------------------------------------
+# 1. La regresión documentada: credencial de PostgreSQL escrita como literal.
+#    Dispara con `$password = 'algo'` pero NO con `$password = $CFG->dbpass;`
+#    ni con `$password = $otra_variable;`. La distinción es todo el valor de la regla.
+# ---------------------------------------------------------------------------
 [[rules]]
-id = "env-assigned-secret"
-description = "Password/secret/token assigned in a committed file"
-regex = '''(?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY)\s*=\s*\S{4,}'''
-tags = ["generic", "env"]
+id = "pg-password-literal"
+description = "Contrasena de PostgreSQL asignada como literal en el plugin (DESPLIEGUE_PREPROD.md instruye a hacerlo: si se commitea, la clave de la base entra en la historia)"
+regex = '''(?i)\$(password|pass|dbpass)\s*=\s*['"][^'"$][^'"]{5,}['"]'''
+path = '''\.php$'''
+tags = ["postgres", "plugin", "regresion-documentada"]
 
-# Add project-specific rules below (framework keys, internal token formats). Example:
-# [[rules]]
-# id = "laravel-app-key"
-# regex = '''APP_KEY\s*=\s*base64:[A-Za-z0-9+/=]{40,}'''
+# ---------------------------------------------------------------------------
+# 2. Fragmentos del config.php de Moodle pegados en documentación o scripts.
+#    Es como se filtraría la clave sin tocar el código del plugin.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "moodle-cfg-dbpass-literal"
+description = "CFG-dbpass con valor concreto (config.php de Moodle copiado a un documento o script)"
+regex = '''\$CFG->dbpass\s*=\s*['"][^'"<.\s][^'"]{5,}['"]'''
+tags = ["moodle", "config"]
+
+# ---------------------------------------------------------------------------
+# 3. PGPASSWORD con valor real en documentación o scripts de despliegue.
+#    Se excluyen los marcadores que el equipo sí usa: <...>, LA_CLAVE_*, ..., ***
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "pgpassword-inline"
+description = "PGPASSWORD con un valor concreto en un comando de despliegue"
+regex = '''(?i)PGPASSWORD\s*=\s*['"]?[A-Za-z0-9!@#$%^&*()_+\-=]{6,}'''
+tags = ["postgres", "despliegue"]
+
+# ---------------------------------------------------------------------------
+# 4. Cadena de conexión PDO/PostgreSQL completa con contraseña embebida.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "pgsql-dsn-with-password"
+description = "DSN de PostgreSQL con password embebida"
+regex = '''(?i)pgsql:[^'"\n]*password\s*=\s*[^;'"\s]{4,}'''
+tags = ["postgres", "dsn"]
+
+# ---------------------------------------------------------------------------
+# 5. Credenciales de la plataforma en documentación (usuario+clave juntos).
+#    Los informes de QA y pentest de docs/ son el sitio donde de verdad aparecerían.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "cuenta-zajuna-en-doc"
+description = "Par usuario/contrasena de una cuenta de la plataforma escrito en documentacion"
+regex = '''(?i)(usuario|username|cuenta)\s*[:=]\s*\S{3,}\s*[,;|/]?\s*(contrase[nñ]a|password|clave)\s*[:=]\s*\S{6,}'''
+tags = ["cuenta", "documentacion"]
+
+[allowlist]
+description = "Lo que en ESTE repositorio no puede ser un secreto"
+
+paths = [
+  # Diagramas y catálogos: no llevan credenciales y sí mucho ruido de alta entropía.
+  '''docs/.*\.(puml|mmd)$''',
+  '''db/.*\.ods$''',
+  # Los .sql de migraciones son DDL con 118 centros y 34 regionales: nombres, no secretos.
+  '''db/migrations/.*\.sql$''',
+  # Plantilla HTML del correo (41 KB de estilos inline).
+  '''docs/Cuerpo_Correo\.html$''',
+  '''LICENSE\.md$''',
+]
+
+regexes = [
+  # El diseño correcto del plugin: variable = variable. NUNCA es una fuga.
+  '''\$(password|pass|dbpass|user|host|dbname)\s*=\s*\$(CFG->|[A-Za-z_])''',
+  # Marcadores de posición que el equipo usa de verdad en su documentación.
+  '''(?i)(password|dbpass|PGPASSWORD|clave)\s*[:=]\s*['"]?(<[^>]*>|\.{2,}|\*{3,}|(LA_)?CLAVE[A-Z_]*|TU_[A-Z_]+|SU_[A-Z_]+|XXX+)''',
+  # Imágenes del carrusel: se guardan como base64 en columnas text (DEPLOY.md §2.3).
+  # Un blob base64 largo aquí es una imagen, no una llave privada.
+  '''data:image/(png|jpe?g|webp|gif);base64,''',
+  # sesskey / logintoken de Moodle en ejemplos y comentarios: son antifalsificación
+  # por petición, no credenciales persistentes.
+  '''(?i)(sesskey|logintoken)\s*[:=]''',
+]

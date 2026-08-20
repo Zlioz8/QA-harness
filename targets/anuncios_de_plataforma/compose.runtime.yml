@@ -1,37 +1,48 @@
-# Runtime for anuncios_de_plataforma — rung 3, composed from recipes.
+# Runtime para anuncios_de_plataforma — RONDA 2.
 #
-# `local_slider` and `local_slider_form` are Moodle plugins: they have no entry point of their
-# own, so there is nothing to point a scanner at until a Moodle exists around them. This file
-# builds that Moodle, ephemeral and reproducible, and destroys it with `make down`.
+# QUÉ CAMBIÓ RESPECTO A LA RONDA 1, Y POR QUÉ IMPORTA PARA LEER LAS CIFRAS.
 #
-# PLUGIN_SUBDIR is the repository ROOT here, not a single plugin directory: the recipe's install
-# hook finds every version.php and derives each plugin's destination from its own
-# `$plugin->component`, so both plugins are installed and upgraded by Moodle itself.
+# En la ronda 1 este archivo CONSTRUÍA el blanco: incluía recipes/moodle-baseline.yml, que
+# levantaba un Moodle efímero en :8083 con la línea base de la plataforma y le instalaba los
+# dos plugins. Era la única forma de apuntar un escáner a un plugin, que por sí solo no tiene
+# punto de entrada.
 #
-# What this deliberately does NOT do: seed content. An empty Moodle answers every plugin screen
-# with "nothing to show", and a DAST run against empty screens finds an empty application. The
-# seeded scenario is the next input the operator owes this profile — see targets/antiplagio for
-# the shape of one (seed-users.sh).
-
-# include paths resolve against the PROJECT directory (the lab root), not against this file.
-# NOT recipes/postgres.yml: moodle-baseline.yml brings its own `db`, because the baseline's
-# restore and neutering run from that container's init hooks. Including both would define the
-# service twice and compose would silently merge them into something neither recipe describes.
-include:
-  - path: ./recipes/moodle-baseline.yml
+# En la ronda 2 el blanco EXISTE y no lo gobierna el laboratorio: el plugin se desplegó en el
+# Zajuna bare metal de esta máquina siguiendo slider_form/DEPLOY.md §10 (nginx 1.24 +
+# php8.1-fpm pool zajuna + PostgreSQL 16, Moodle 4.3.3+ en /var/www/zajuna). Por tanto:
+#
+#   · Se retira el `include` de la receta. Dejarlo levantaría un SEGUNDO Moodle en :8083 y nada
+#     diría cuál de los dos contestó — el collage de procedencias que este laboratorio existe
+#     para no producir. La receta NO se borra: sigue en recipes/ y la ronda 1 se midió con ella.
+#   · PERF_CPUS / PERF_MEM ya NO se aplican: no hay `deploy.resources.limits` sobre un servicio
+#     del sistema. RUN.md debe decir que el envelope declarado no está impuesto, o las cifras de
+#     carga parecerán comparables cuando no lo son.
+#   · Las cabeceras de seguridad SÍ son atribuibles ahora: las emite el nginx de la plataforma,
+#     no el php:8.2-apache del laboratorio. El descuento que hacía la ronda 1 ya no aplica.
 
 services:
-  # ZAP en la red del HOST, sólo para este perfil.
+  # ZAP en la red del HOST, igual que en la ronda 1 y por la misma razón de fondo: Moodle impone
+  # su wwwroot y responde 303 a toda petición cuyo Host no coincida. Aquí el wwwroot es
+  # https://nginx.zajuna.com/zajuna, que sólo resuelve por el /etc/hosts del anfitrión.
   #
-  # Moodle impone su wwwroot: cualquier petición cuyo Host no coincida recibe una redirección
-  # 303 hacia él. Con ZAP en la red del compose, pedir http://moodle:80/zajuna devuelve un
-  # redirect a http://localhost:8083 — y "localhost" dentro del contenedor de ZAP es ZAP, no
-  # Moodle. El spider muere con "Connection refused" y el informe sale vacío pero existiendo,
-  # que es la peor combinación: parece que se midió.
-  #
-  # En la red del host, localhost:8083 significa lo mismo para ZAP que para el navegador, así
-  # que la redirección de Moodle resuelve. Es la misma razón por la que playwright usa
-  # network_mode: host. No se toca el servicio zap del núcleo: otros perfiles apuntan a un
-  # contenedor por nombre de servicio y allí la red del compose es la correcta.
+  # `network_mode: host` da a ZAP la pila de red del anfitrión, pero NO su /etc/hosts: docker
+  # inyecta el suyo. Sin `extra_hosts`, nginx.zajuna.com no resuelve dentro del contenedor, ZAP
+  # aborta con "unknown host" y el informe sale vacío pero existiendo — la peor combinación,
+  # porque parece que se midió.
   zap:
     network_mode: host
+    extra_hosts:
+      - "nginx.zajuna.com:127.0.0.1"
+
+  # Mismo razonamiento para k6: necesita resolver el wwwroot exacto o mediría redirecciones.
+  # El certificado es autofirmado; K6_INSECURE_SKIP_TLS_VERIFY=true está declarado en target.env
+  # (sin él k6 aborta el 100% de las peticiones y el informe lo pinta como fallo de la app).
+  k6:
+    extra_hosts:
+      - "nginx.zajuna.com:host-gateway"
+
+  # Playwright ya corre con network_mode: host en el núcleo; hereda el /etc/hosts de docker,
+  # así que necesita la misma entrada.
+  playwright:
+    extra_hosts:
+      - "nginx.zajuna.com:127.0.0.1"

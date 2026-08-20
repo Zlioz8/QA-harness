@@ -42,7 +42,20 @@ export default function () {
       '/local/slider_form/index.php',
       '/local/slider_form/menu.php',
       '/local/slider_form/show_order.php',
-      '/local/slider_form/table_logs.php',
+      // table_logs.php SE RETIRA de la carga, y la razón es el hallazgo §3.3, no una comodidad.
+      //
+      // Exige DOS parámetros obligatorios (`asunto` y `created_at`, table_logs.php:27-28). La
+      // primera versión de este guion solo pasaba `asunto`, así que Moodle devolvía 404 «Un
+      // parámetro necesario (created_at) faltaba» y k6 reportaba 19,63% de error: una cifra que
+      // describía un defecto de ESTE ARCHIVO, no de la aplicación.
+      //
+      // Corregidos ambos parámetros, el endpoint sigue fallando al 100%, pero con el error real:
+      // SQLSTATE[42703] «no existe la columna estado» — porque ninguna migración crea
+      // envios2.estado ni envios2.sent_at (DEPLOY.md §8.5).
+      //
+      // Mantenerlo aquí garantizaría que el umbral de error se incumpla siempre por una causa ya
+      // conocida y reportada, y haría inútil la cifra agregada. Vuelve a la carga cuando §3.3
+      // esté corregido.
     ]) {
       const res = http.get(`${BASE}${path}`, { jar, tags: { endpoint: path } });
       // Status alone is not enough: Moodle answers 200 with the LOGIN PAGE when the session has

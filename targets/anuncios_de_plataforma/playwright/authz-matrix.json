@@ -1,19 +1,19 @@
 [
   {
-    "path": "/local/slider_form/index.php",
-    "method": "GET",
-    "allow": [
-      "A"
-    ],
-    "note": "administration screen for the platform-wide banner; index.php only calls require_login, so any authenticated learner reaching it is the finding"
-  },
-  {
     "path": "/local/slider_form/menu.php",
     "method": "GET",
     "allow": [
       "A"
     ],
-    "note": "plugin menu"
+    "note": "Hub del back-office. checkUserRole(...,'view'): exige local/slider_form:view. Es la puerta de entrada, y la primera que un aprendiz probaria."
+  },
+  {
+    "path": "/local/slider_form/index.php",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "Pantalla de administracion del banner de TODA la plataforma. checkUserRole con el nivel por defecto 'edit'. Cualquier cuenta autenticada que la alcance es el hallazgo."
   },
   {
     "path": "/local/slider_form/segmented.php",
@@ -21,7 +21,7 @@
     "allow": [
       "A"
     ],
-    "note": "segmented-mailing composer: picks regionales, centros, programas and roles"
+    "note": "Compositor del envio segmentado: elige regionales, centros, programas, fechas y roles. Exige ':edit'."
   },
   {
     "path": "/local/slider_form/manage_images.php",
@@ -29,7 +29,7 @@
     "allow": [
       "A"
     ],
-    "note": "banner image management"
+    "note": "Gestion de imagenes del carrusel. Exige ':edit'. Las imagenes se guardan como base64 en columnas text de mdl_local_slider (DEPLOY.md 2.3), no por la File API de Moodle."
   },
   {
     "path": "/local/slider_form/show_order.php",
@@ -37,15 +37,47 @@
     "allow": [
       "A"
     ],
-    "note": "checkUserRole is called with the 'view' level here, unlike the write endpoints"
+    "note": "Orden del carrusel. Exige ':edit' (nivel por defecto), a diferencia de menu/send_logs/table_logs que se conforman con ':view'."
   },
   {
-    "path": "/local/slider_form/table_logs.php?asunto=lab",
+    "path": "/local/slider_form/send_logs.php",
     "method": "GET",
     "allow": [
       "A"
     ],
-    "note": "delivery log. Needs the 'asunto' parameter: without it Moodle answers 404 for a missing required param, which the matrix would otherwise read as a denial"
+    "note": "Historial de envios. checkUserRole(...,'view'). OJO al interpretar un fallo aqui: lee envios2.estado, columna que NINGUNA migracion del repositorio crea (DEPLOY.md 8.5) — un 500 puede ser el esquema incompleto, no un fallo de autorizacion."
+  },
+  {
+    "path": "/local/slider_form/table_logs.php?asunto=lab&created_at=2026-01-01%2000:00:00",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "Detalle del historial. checkUserRole(...,'view'). Exige DOS parametros obligatorios: `asunto` Y `created_at` (table_logs.php:27-28). Con uno solo, Moodle responde 404 'Un parametro necesario (created_at) faltaba' y la matriz lo leeria como DENEGACION. Con ambos correctos devuelve 404 igualmente, pero por el defecto real: SQLSTATE[42703] 'no existe la columna estado' (ver §3.3)."
+  },
+  {
+    "path": "/local/slider_form/ajax/export_envios.php?asunto=lab",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "Exporta el historial a XLSX: listas de DESTINATARIOS, es decir datos personales. checkUserRole(...,'view') y sin CSRF, correcto por ser una lectura. `asunto` obligatorio, igual que table_logs."
+  },
+  {
+    "path": "/local/slider_form/ajax/categories.php?action=modalidades",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "Cascada de filtros. NO usa los envoltorios del plugin: hace isloggedin() -> 401 y has_capability(':edit') -> 403 en linea (ajax/categories.php:58-67). Verificado leyendo el fichero: esta correctamente protegido, solo con otro idioma."
+  },
+  {
+    "path": "/local/slider_form/ajax/saved_filters.php?action=list",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "Filtros guardados. El codigo los documenta como POR ADMINISTRADOR (created_by = USER->id); esta regla solo pregunta si un aprendiz alcanza el endpoint. Si un administrador ve los filtros de OTRO hace falta una segunda cuenta de privilegio alto, que no se ha pedido."
   },
   {
     "path": "/local/slider_form/insertRecord.php",
@@ -54,7 +86,7 @@
       "A"
     ],
     "body": {},
-    "note": "creates a banner shown to the whole platform. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+    "note": "Crea un banner visible en toda la plataforma. checkSession + checkUserRole(':edit') + checkCsrfToken. En la RONDA 1 se anoto BROKEN sobre Moodle 4.5 porque 4.5 elimino cache/lib.php; en este despliegue (4.3.3+, la version real de la plataforma) ese require_once resuelve, asi que la autorizacion SI se ejercita. La nota anterior ya no aplica."
   },
   {
     "path": "/local/slider_form/updateRecord.php",
@@ -63,7 +95,7 @@
       "A"
     ],
     "body": {},
-    "note": "edits an existing banner. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+    "note": "Edita un banner existente. Mismas guardas. Igual que insertRecord: sobre 4.3.3+ ya no esta roto por cache/lib.php."
   },
   {
     "path": "/local/slider_form/deleteRecord.php",
@@ -72,7 +104,7 @@
       "A"
     ],
     "body": {},
-    "note": "deletes a banner. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+    "note": "Borra un banner. Mismas guardas. Sobre 4.3.3+ se ejercita de verdad."
   },
   {
     "path": "/local/slider_form/order.php",
@@ -81,48 +113,15 @@
       "A"
     ],
     "body": {},
-    "note": "reorders the carousel. BROKEN on Moodle 4.5: the file does require_once($CFG->dirroot.'/cache/lib.php'), which no longer exists. It throws before any permission check, for every role — so authorization here is UNTESTED, not proven"
+    "note": "Reordena el carrusel. Mismas guardas. Sobre 4.3.3+ se ejercita de verdad."
   },
   {
-    "path": "/local/slider_form/ajax/send_segmented.php",
+    "path": "/local/slider_form/active_role_users.php",
     "method": "POST",
     "allow": [
       "A"
     ],
     "body": {},
-    "note": "SENDS MASS EMAIL to every user enrolled in the resolved courses. The highest-impact endpoint in the plugin: if a low-privilege account reaches it, the platform is a spam relay addressed from an institutional domain. db/access.php tags the capability RISK_SPAM for this reason"
-  },
-  {
-    "path": "/local/slider_form/ajax/preview_correo.php",
-    "method": "POST",
-    "allow": [
-      "A"
-    ],
-    "body": {},
-    "note": "renders the mail preview; semgrep flags a tainted callable at line 196 of this file"
-  },
-  {
-    "path": "/local/slider_form/ajax/saved_filters.php?action=list",
-    "method": "GET",
-    "allow": [
-      "A"
-    ],
-    "note": "saved recipient filters. The file documents them as per-administrator (created_by = $USER->id); this rule only asks whether a learner reaches the endpoint at all — whether one admin sees another's filters needs a second seeded admin. NOT MEASURABLE in the ephemeral Moodle: the endpoint opens the external 'zajunadb' and the PDO driver is absent (500 'could not find driver'). That external database is also where the 13 gitleaks hits come from"
-  },
-  {
-    "path": "/local/slider_form/ajax/export_envios.php?asunto=lab",
-    "method": "GET",
-    "allow": [
-      "A"
-    ],
-    "note": "exports the delivery history (recipient lists = personal data). 'asunto' required, same reason as table_logs"
-  },
-  {
-    "path": "/local/slider_form/ajax/categories.php?action=list",
-    "method": "GET",
-    "allow": [
-      "A"
-    ],
-    "note": "the only endpoint that never calls checkSession — it uses has_capability/is_siteadmin directly. 'action' is required"
+    "note": "Devuelve NOMBRE y CORREO de todos los usuarios activos de los roles indicados: datos personales a granel. Usa las funciones nativas de Moodle en vez de los envoltorios (require_login + require_capability(':edit') + confirm_sesskey). Verificado leyendo el fichero: correcto."
   }
 ]
