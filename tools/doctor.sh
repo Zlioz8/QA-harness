@@ -18,6 +18,7 @@ docker compose version >/dev/null 2>&1 && ok "compose: $(docker compose version 
 # spaces (a path like /opt/MANUALES DE DESPLIEGUE/... silently becomes a command), and it
 # would also execute whatever a target profile happens to contain.
 . "$(dirname "$0")/lib-env.sh"   # one parser for target.env — see the file for why
+. "$(dirname "$0")/lib-repos.sh" # one discoverer of repos under SRC_PATH — idem
 SRC_PATH=$(envget SRC_PATH)
 ROLE_A_USER=$(envget ROLE_A_USER); ROLE_B_USER=$(envget ROLE_B_USER)
 AUTH_ADAPTER=$(envget AUTH_ADAPTER); HEALTH_PATH=$(envget HEALTH_PATH); BASE_URL=$(envget BASE_URL)
@@ -28,16 +29,64 @@ FRONTEND_PORT=$(envget FRONTEND_PORT); PROD_PORT=$(envget PROD_PORT); MOODLE_POR
 # A project is not always one checkout. MOVIL is two repos under a parent that is not one, and a
 # check that only asked for `$SRC_PATH/.git` warned "no git history" about a fully versioned
 # project — sending the operator to fix something that was not broken. Same discovery rule as
-# tools/secrets.sh and tools/run-manifest.sh: the parent, or one level of children.
+# tools/secrets.sh and tools/run-manifest.sh: the parent, or one level of children. That rule
+# now lives in ONE place, tools/lib-repos.sh, instead of the four hand-copied versions it had.
 if [ -d "${SRC_PATH:-}/.git" ]; then
   ok "git history present (secret scanning is meaningful)"
 else
-  _repos=(); for _d in "${SRC_PATH:-.}"/*/; do [ -d "$_d.git" ] && _repos+=("$(basename "$_d")"); done
+  mapfile -t _repos < <(discover_repos "${SRC_PATH:-}")
   if [ "${#_repos[@]}" -gt 0 ]; then
     ok "git history present in ${#_repos[@]} sub-repos: ${_repos[*]}"
   else
     warn "no .git in SRC_PATH nor in its subdirectories — gitleaks/trufflehog will only see the working tree"
   fi
+fi
+
+# ¿Está el checkout en la rama que se va a auditar de verdad?
+#
+# Existe porque las dos mitades del laboratorio miran cosas distintas y nada las reconciliaba
+# (L-R5-02): `ingest-deploy` coteja el COMMIT de la rama declarada, mientras que
+# detect/secrets/semgrep/deps/sbom/sonar/qodana analizan el ÁRBOL DE TRABAJO, esté donde esté.
+# Un `git clone` deja el checkout en la rama por defecto del remoto. En `encuestas` esa rama es
+# `main`: el monorepo de marzo, con otra estructura y la mitad de ficheros. Todo el estático
+# habría medido esa rama y el informe la habría presentado como la auditada, sin un solo aviso y
+# con cifras perfectamente plausibles.
+#
+# EL CRITERIO ES LA FRESCURA, no lo que declare el perfil. En esta fábrica la rama buena es, casi
+# siempre, la ÚLTIMA ACTUALIZADA: los equipos trabajan en `feature/...` y `main` se queda atrás
+# meses. Comprobado en los proyectos auditados hasta ahora — `analitica_notificaciones` tenía lo
+# bueno en `bd-externa`, `encuestas` en `feature/integracion-zajuna` (2026-08-06) contra un `main`
+# de marzo. Un contraste contra `BRANCH` solo diría que el perfil se copió a sí mismo; la fecha
+# del último commit es un dato del remoto, y por eso puede contradecirte.
+#
+# Es `warn` y no `bad` a propósito: auditar una rama que no es la más fresca es a veces deliberado
+# (una `release/` estabilizada, o comparar contra `main`). Lo que no puede pasar es en silencio.
+while IFS= read -r _root; do
+  [ -n "$_root" ] && [ -d "$_root/.git" ] || continue
+  _on=$(git -C "$_root" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  # La más reciente por fecha de COMMIT, sobre las ramas del remoto (que es lo que el equipo
+  # publicó). --sort=-committerdate ordena descendente; la primera es la ganadora.
+  _fresh=$(git -C "$_root" for-each-ref --sort=-committerdate --format='%(refname:short)' \
+             refs/remotes/origin 2>/dev/null | grep -v '/HEAD$' | head -1)
+  _fresh="${_fresh#origin/}"
+  _when=$(git -C "$_root" log -1 --format=%ad --date=short "origin/$_fresh" 2>/dev/null)
+  if [ -z "$_fresh" ]; then
+    :
+  elif [ "$_on" = "$_fresh" ]; then
+    ok "$(basename "$_root"): checkout en \`$_on\`, que es la rama más reciente ($_when)"
+  else
+    _on_when=$(git -C "$_root" log -1 --format=%ad --date=short HEAD 2>/dev/null)
+    warn "$(basename "$_root"): el checkout está en \`${_on:-?}\` ($_on_when) pero la rama más reciente es \`$_fresh\` ($_when) — el análisis ESTÁTICO medirá \`${_on:-?}\`. Si es la rama equivocada: git -C '$_root' checkout $_fresh"
+  fi
+done < <(src_roots "${SRC_PATH:-}")
+
+# What will NOT be analysed. Narrowing the input was the fix; narrowing it SILENTLY would be the
+# same defect wearing the other face, so the operator sees it here — before running anything —
+# and the full list is recorded in RUN.md alongside the coverage it qualifies.
+mapfile -t _outside < <(non_repo_entries "${SRC_PATH:-}")
+if [ "${#_outside[@]}" -gt 0 ]; then
+  warn "${#_outside[@]} entries under SRC_PATH are NOT repositories and will be left out of the code analysis:"
+  printf '        %s\n' "${_outside[@]}"
 fi
 
 # Two accounts of different privilege. Without them the authorization matrix is untestable,

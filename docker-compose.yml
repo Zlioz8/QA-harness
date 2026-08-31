@@ -162,10 +162,16 @@ services:
       # --config points qodana at it instead, which needs no writable spot in the source.
       - ./targets/${TARGET_NAME}/qodana.yaml:/data/conf/qodana.yaml:ro
       - ./reports/${TARGET_NAME}/qodana:/data/results
-    # --project-dir points qodana at the sub-repo to inspect. Qodana requires a git repo at the
-    # project dir (it fails "not a git repository" otherwise), so a workspace whose root is not a
-    # repo but whose CHILDREN are (movil = zajuna-frontend + zajuna-backend) must name one via
-    # QODANA_SUBDIR in target.env. Single-repo targets leave it unset and inspect the root ".".
+    # --project-dir points qodana at the tree to inspect. Qodana requires a git repo at the
+    # project dir (it fails "not a git repository" otherwise).
+    #
+    # QODANA_SUBDIR IS NOW A LEGACY ESCAPE HATCH, AND SHOULD STAY EMPTY. It existed because
+    # ${SRC_PATH} used to be mounted whole, so a profile whose root is not a repo but whose
+    # CHILDREN are (movil = zajuna-frontend + zajuna-backend) had to name one by hand — one
+    # repo, chosen manually, with the other silently unanalysed. tools/run-dimension.sh now
+    # mounts each discovered repository in turn (per_repo in lib/dimensions.yml), so
+    # /data/project IS the repo and "." is right for every profile. Setting it non-empty today
+    # points qodana at a path that no longer exists inside the narrowed mount.
     command: ["--save-report", "--config", "/data/conf/qodana.yaml", "--project-dir", "/data/project/${QODANA_SUBDIR:-.}"]
 
   # Polyglot SAST with taint tracking. Covers the languages Qodana does not, and finds
@@ -289,6 +295,12 @@ services:
     # with this mapping. Playwright does not need it: it runs with network_mode: host.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      # Alcanzar un despliegue del HOST por su NOMBRE REAL (no host.docker.internal). Cuando el
+      # blanco es un Moodle cuyo wwwroot es un hostname (p.ej. nginx.zajuna.com), ZAP debe pedirlo
+      # por ESE nombre: si no, cada redirect de Moodle apunta a un host que el contenedor no
+      # resuelve, y el cert autofirmado sólo casa con ese server_name. TARGET_HOST_ALIAS lo fija
+      # el perfil en target.env.local; sin él, un nombre inocuo que no resuelve a nada útil.
+      - "${TARGET_HOST_ALIAS:-none.invalid}:host-gateway"
     # El plan (automation.yaml) es conocimiento del proyecto, pero la URL del blanco NO debe estar
     # incrustada: en peldaño 2 apunta a un despliegue externo (APP_INTERNAL_URL), no a un servicio
     # `app` del compose. Sin esto ZAP resolvía `http://app:8000` y moría con "name resolution".
@@ -365,6 +377,7 @@ services:
     # on the host rather than at a container the lab started.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "${TARGET_HOST_ALIAS:-none.invalid}:host-gateway"
     env_file:
       - path: ./targets/${TARGET_NAME}/target.env
         required: true

@@ -162,6 +162,7 @@
   measured: false
   needs: source
   runner: local
+  per_repo: true
 
 - id: trivy-config
   label: Configuración de contenedores
@@ -184,6 +185,7 @@
   measured: false
   needs: source
   runner: local
+  per_repo: true
 
 - id: trivy-image
   label: CVE de imágenes
@@ -231,6 +233,7 @@
   measured: false
   needs: source
   runner: local
+  per_repo: true
 
 # ---------------------------------------------------------------- código
 
@@ -255,6 +258,7 @@
   measured: false
   needs: source
   runner: local
+  per_repo: true
 
 # Calidad: DOS motores, y a partir de la fase 2 DOS presupuestos. gate.sh:59-79 los sumaba contra
 # uno solo. El argumento de entonces (son dos motores preguntando lo mismo) no se sostiene: un
@@ -309,6 +313,7 @@
   measured: false
   needs: source
   runner: local
+  per_repo: true
 
 # ---------------------------------------------------------------- artefacto distribuible
 
@@ -487,6 +492,47 @@
   measured: false
   needs: target-network
   runner: local
+
+
+# ---------------------------------------------------------------- flujos en navegador (MCP)
+
+# La navegación REAL del usuario por la interfaz, conducida con el servidor MCP del navegador
+# (Playwright) que corre en esta máquina. No es `playwright` (esa dimensión ejercita la API con
+# specs headless y una matriz de autorización): esta recorre los FLUJOS de la aplicación como los
+# ve una persona —login SSO por el plugin, seleccionar un reporte, vista previa, generar,
+# descargar, programar— y CONTRASTA los hallazgos de las otras dimensiones contra lo que de verdad
+# pasa en el navegador, con sus logs de consola y de red como evidencia.
+#
+# Es CONDUCIDA, no automatizada desde `make`: el laboratorio no puede invocar el servidor MCP: lo
+# maneja el operador (o el agente) que tiene el navegador delante. Igual que `device`, su ausencia
+# NO es «sin hallazgos» — es una dimensión viva no ejecutada. `make mcp-journey` explica el
+# procedimiento y exige el artefacto; `tools/require-mcp.sh` la contempla en el flujo live.
+#
+# Ya dio hallazgos que ninguna otra dimensión vio: la vista previa devolviendo 502 en producción,
+# el JWT guardándose en localStorage, y los reportes dependiendo de un esquema `midb` no
+# documentado — todo visible solo recorriendo el flujo con el navegador real.
+- id: mcp-journey
+  label: Flujos de usuario en navegador (MCP)
+  tool: Playwright MCP
+  goal: mcp-journey
+  service: 
+  profile: 
+  kind: manual
+  artifact: mcp/journeys.md
+  inputs: BASE_URL
+  script: mcp/flows.md
+  script_kind: flujos
+  object: 
+  gate:
+  default:
+  live: true
+  triage: true
+  class: browser
+  mem: 1g
+  measured: false
+  needs: target-network
+  runner: local
+  per_repo: false
 
 # ---------------------------------------------------------------- humano
 

@@ -9,15 +9,33 @@ ENVFILE="targets/$TARGET/target.env"
 [ -f "$ENVFILE" ] || { echo "no $ENVFILE — run: make new TARGET=$TARGET"; exit 2; }
 
 # Never `source` a target.env: values may contain spaces, and a profile is data, not code.
-SRC=$(sed -n 's/^SRC_PATH=//p' "$ENVFILE" | tail -1 | sed 's/^"//; s/"$//')
+#
+# Read it with the shared parser, not a private sed. This file had its own one-liner, and that
+# one-liner did NOT apply the target.env.local override — the very place the profile contract
+# says the real deployment values live. A SRC_PATH set there was invisible here, and detect
+# answered "SRC_PATH not a directory" about a perfectly configured profile. Exactly the drift
+# tools/lib-env.sh exists to prevent, and the same one that once made `make secrets` report
+# "0 secrets" on a repository with a committed token.
+. "$(dirname "$0")/lib-env.sh"
+. "$(dirname "$0")/lib-repos.sh"
+SRC=$(envget SRC_PATH)
 [ -d "$SRC" ] || { echo "SRC_PATH not a directory: $SRC"; exit 2; }
+
+# What gets sniffed are the REPOSITORIES, not the folder that holds them. SRC_PATH is allowed —
+# encouraged, for multi-repo projects — to be a parent directory, and a parent directory on a
+# working machine also holds deployment manuals, screenshots and logs from other sessions.
+# Proposing LANGS from a file census that counted those would seed the whole profile wrong.
+mapfile -t ROOTS < <(src_roots "$SRC")
 
 echo "== detect: $TARGET =="
 echo "source: $SRC"
+[ "${#ROOTS[@]}" -eq 1 ] && [ "${ROOTS[0]}" = "$SRC" ] || printf 'repos:  %s\n' "${ROOTS[@]}"
+mapfile -t _OUT < <(non_repo_entries "$SRC")
+[ "${#_OUT[@]}" -gt 0 ] && printf 'not scanned (not a repo): %s\n' "${_OUT[*]}"
 echo
 
 PRUNE=( -name node_modules -o -name vendor -o -name .git -o -name __pycache__ -o -name .venv )
-scan() { find "$SRC" -type d \( "${PRUNE[@]}" \) -prune -o "$@" -print 2>/dev/null; }
+scan() { find "${ROOTS[@]}" -type d \( "${PRUNE[@]}" \) -prune -o "$@" -print 2>/dev/null; }
 
 LANGS=(); RECIPES=(); NOTES=()
 add_note() { NOTES+=("$1"); }
@@ -37,7 +55,7 @@ ADAPTER=none
 if [ -n "$(scan -type f -name artisan | head -1)" ]; then
   RECIPES+=(laravel-fpm)
   add_note "Laravel detected (artisan). recipes/laravel-fpm for load testing; laravel-artisan boots faster for functional runs."
-  grep -rqls 'sanctum' "$SRC" --include='composer.json' 2>/dev/null && ADAPTER=sanctum
+  grep -rqls 'sanctum' "${ROOTS[@]}" --include='composer.json' 2>/dev/null && ADAPTER=sanctum
 fi
 
 if scan -type f \( -name requirements.txt -o -name pyproject.toml \) | head -1 | grep -q .; then
@@ -110,7 +128,7 @@ done < <(scan -type f -name 'docker-compose*.y*ml')
 
 # --- auth adapter fallback (only if nothing stronger matched) ---
 if [ "$ADAPTER" = none ]; then
-  grep -rqls 'OAuth2PasswordBearer\|Authorization: Bearer\|PyJWT\|jwt.encode' "$SRC" --include='*.py' 2>/dev/null && ADAPTER=jwt-bearer
+  grep -rqls 'OAuth2PasswordBearer\|Authorization: Bearer\|PyJWT\|jwt.encode' "${ROOTS[@]}" --include='*.py' 2>/dev/null && ADAPTER=jwt-bearer
 fi
 
 uniq_join() { printf '%s\n' "$@" | grep -v '^$' | awk '!seen[$0]++' | paste -sd, -; }

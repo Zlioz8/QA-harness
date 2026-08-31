@@ -1,0 +1,21 @@
+# Runtime override de reportes_de_cursos — SOLO para el despliegue LOCAL sobre el core de la máquina.
+#
+# POR QUÉ EXISTE. El despliegue vive detrás del nginx del core, cuyo vhost es `nginx.zajuna.com`, y
+# Moodle valida `HTTP_HOST` contra `$CFG->wwwroot`: una petición con otro Host recibe
+# `redirecterrordetected` en vez de la respuesta. Playwright corre en `network_mode: host` y usa el
+# hostname real, así que no le afecta. Pero k6 y api-fuzz corren en la red bridge y alcanzaban el
+# host por `host.docker.internal` — Host equivocado → el login de k6 fallaba (medido 2026-08-21).
+#
+# La solución es que esos contenedores resuelvan `nginx.zajuna.com` al gateway del host y usen ese
+# hostname (APP_INTERNAL_URL=https://nginx.zajuna.com en target.env.local). Así el Host viaja
+# correcto y el certificado autofirmado se cubre con K6_INSECURE_SKIP_TLS_VERIFY.
+services:
+  k6:
+    extra_hosts:
+      - "nginx.zajuna.com:host-gateway"
+  api-fuzz:
+    extra_hosts:
+      - "nginx.zajuna.com:host-gateway"
+  zap:
+    extra_hosts:
+      - "nginx.zajuna.com:host-gateway"

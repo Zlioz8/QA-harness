@@ -1,0 +1,78 @@
+# Reglas semgrep propias de Centro de Calificaciones (centro_de_actividades / centro_de_resultados /
+# sincronizacion). NO son un catálogo genérico: son invariantes de ESTE código, leídos a mano
+# (2026-08-25). Viven en lib/semgrep/ porque el servicio semgrep del laboratorio monta ./lib como
+# /seclab-lib y NO monta el directorio del target (limitación anotada en BITACORA_LABORATORIO.md).
+#
+# El invariante central: el SSO de entrada (login_config.php) recibe la identidad del usuario por
+# query string (user, courseid, roleid) y arranca sesión con ella. El único elemento anti-suplantación
+# que Moodle provee para esto es el `sesskey`, que se PASA pero NUNCA se VALIDA (no hay confirm_sesskey
+# ni equivalente en TODO el árbol). Estas reglas marcan las piezas de ese patrón para que el hallazgo
+# tenga anclaje por línea, no solo prosa.
+
+rules:
+  # ---------------------------------------------------------------------------
+  # 1. Identidad de sesión tomada de la petición y usada para iniciar sesión.
+  #    Source: parámetro `user`/`roleid`/`courseid` leído de GET.
+  #    Sink:   argumento de una llamada que ESTABLECE sesión (iniciarSesion) o asignación a $_SESSION.
+  # ---------------------------------------------------------------------------
+  - id: calif-session-identity-from-request
+    languages: [php]
+    severity: ERROR
+    message: >
+      La identidad de la sesión (user/roleid/courseid) proviene de la petición HTTP y se usa para
+      iniciar sesión. Si no se valida el `sesskey` contra la sesión de Moodle del MISMO usuario
+      (confirm_sesskey / require_sesskey), cualquiera puede suplantar a otro cambiando `user` en la
+      URL. Verifíquese que el sesskey corresponde a la sesión y al usuario, y que expira.
+    metadata:
+      cwe: "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp: "A01:2021 Broken Access Control"
+      confidence: HIGH
+    mode: taint
+    pattern-sources:
+      - pattern: filter_input(INPUT_GET, ...)
+      - pattern: $_GET[...]
+    pattern-sinks:
+      - pattern: SessionManager::iniciarSesion(...)
+      - pattern: $_SESSION[...] = $SINK
+
+  # ---------------------------------------------------------------------------
+  # 2. Sesión "protegida" solo por IP + User-Agent.
+  #    Es el único cerco que login_config.php pone tras entrar: verificarIp() / verificarUserAgent().
+  #    No es un control de identidad — un atacante en la misma red/NAT comparte IP, y el User-Agent
+  #    es un encabezado controlado por el cliente. Se marca para que conste como control insuficiente.
+  # ---------------------------------------------------------------------------
+  - id: calif-session-bound-only-to-ip-ua
+    languages: [php]
+    severity: WARNING
+    message: >
+      La sesión se ata a REMOTE_ADDR / HTTP_USER_AGENT como única defensa. Ambos son controlables o
+      compartibles (NAT, proxy, cabecera falsificable) y no acreditan identidad. No sustituye a la
+      validación del sesskey ni a una cookie de sesión firmada.
+    metadata:
+      cwe: "CWE-290: Authentication Bypass by Spoofing"
+      owasp: "A07:2021 Identification and Authentication Failures"
+      confidence: MEDIUM
+    patterns:
+      - pattern-either:
+          - pattern: $_SESSION[...] === $_SERVER['REMOTE_ADDR']
+          - pattern: $_SESSION[...] === $_SERVER['HTTP_USER_AGENT']
+
+  # ---------------------------------------------------------------------------
+  # 3. error_log con el mensaje de la excepción / traza: fuga de detalle interno a los logs.
+  #    Aparece en login_config.php (stack trace) y en los config/*.php de conexión. Menor, pero real.
+  # ---------------------------------------------------------------------------
+  - id: calif-error-log-exception-detail
+    languages: [php]
+    severity: INFO
+    message: >
+      Se vuelca el detalle de la excepción (mensaje o traza) al log. En un fallo de conexión esto
+      puede filtrar DSN, host y usuario de BD al registro del servidor. Registrar un identificador
+      de error, no el detalle crudo.
+    metadata:
+      cwe: "CWE-209: Generation of Error Message Containing Sensitive Information"
+      owasp: "A09:2021 Security Logging and Monitoring Failures"
+      confidence: LOW
+    patterns:
+      - pattern-either:
+          - pattern: error_log(<... $E->getMessage() ...>)
+          - pattern: error_log(<... $E->getTraceAsString() ...>)

@@ -1,0 +1,180 @@
+# gitleaks — reglas escritas PARA encuestas (SPA Vue + API Laravel + plugin de Moodle),
+# no el ejemplo genérico.
+#
+# POR QUÉ NO SIRVE LA PLANTILLA. Su `env-assigned-secret` marca
+# `[A-Z0-9_]*(PASSWORD|SECRET|TOKEN|APIKEY)=\S{4,}` sobre cualquier archivo. Este proyecto son
+# 574 archivos PHP —una aplicación Laravel entera más un plugin de Moodle— y 237 de
+# TypeScript/Vue. Ese código MANEJA credenciales sin parar: `config/database.php` lee
+# `env('DB_PASSWORD')`, los form requests validan campos `password`, y
+# `tests/Feature/Breakpoint/` —20.379 líneas de pruebas nuevas en la rama auditada— fabrica
+# contraseñas de mentira a mansalva. Con la regla genérica cada una de esas líneas sale como
+# fuga y entierra las de verdad.
+#
+# LO QUE DE VERDAD HAY QUE BUSCAR AQUÍ, leído del repositorio —`.env.example`,
+# `config/database.php`, `plugin-encuestas-zajuna/generar_secreto.sh` e `install_to_moodle.sh`—
+# y no de un catálogo:
+#
+#   1. `ZAJUNA_SSO_SECRET` — LA credencial que sostiene todo. Es el secreto compartido HMAC-SHA256
+#      con el que Zajuna acuña el «pase de entrada» y Encuestas lo valida. Quien lo tenga entra
+#      como CUALQUIER usuario sin contraseña. `generar_secreto.sh` lo produce con
+#      `openssl rand -hex 32`: son exactamente 64 caracteres hexadecimales. Vive en DOS sitios a
+#      la vez —`ZAJUNA_SSO_SECRET` en el `.env` del backend y un fichero en el dataroot de
+#      Moodle— así que hay que buscar las dos formas.
+#   2. `secreto.txt` — el fichero donde `generar_secreto.sh` deja ese mismo secreto, en el propio
+#      directorio del plugin. `chmod 600` no impide que alguien lo añada a git: es un fichero de
+#      64 hex sueltos dentro del árbol, y por nombre no lo cazaría ninguna regla de asignación.
+#   3. `APP_KEY` de Laravel (`base64:` + 44 caracteres). Cifra las cookies de sesión y todo lo que
+#      pase por `Crypt`. Filtrada, se forjan sesiones.
+#   4. `ZAJUNA_DB_PASSWORD` — la contraseña del rol de SOLO LECTURA contra la réplica de Zajuna.
+#      Es la BD de Moodle: 20.070 usuarios y 23.109 cursos reales. Aunque sea de lectura, es una
+#      fuga de datos personales de toda la fábrica.
+#   5. `DB_PASSWORD` — la base de la propia aplicación (respuestas de encuestas: dato personal).
+#   6. `EXPORT_PDF_PASSWORD` — protege los PDF de reporte que se descargan.
+#   7. `MAIL_PASSWORD` — el canal de correo saliente, que este proyecto usa de verdad
+#      (`SendSurveyEmailJob`, recordatorios programados del scheduler).
+#   8. `userlist.txt` de PgBouncer — el `README-DESPLIEGUE.md` §1 pide generarlo «con el hash
+#      SCRAM real del rol». El repo trae `userlist.txt.example`; el que NO es `.example` sería la
+#      credencial de base de producción versionada.
+#
+# La búsqueda es sobre la HISTORIA, que es donde un secreto se queda aunque se borre del árbol.
+
+[extend]
+useDefault = true   # llaves privadas, AWS, JWT genéricos, tokens de proveedores conocidos
+
+# --- 1. El secreto del SSO con Zajuna --------------------------------------------------------
+# La credencial más grave del proyecto: con ella se acuña un pase válido para cualquier cuenta.
+# Dos formas, porque vive en dos lados.
+[[rules]]
+id = "encuestas-zajuna-sso-secret"
+description = "ZAJUNA_SSO_SECRET — secreto HMAC del pase de entrada (entra como cualquier usuario)"
+regex = '''(?i)ZAJUNA_SSO_SECRET[ \t]*[:=][ \t]*['"]?([0-9a-f]{32,})['"]?'''
+secretGroup = 1
+tags = ["sso", "critico", "zajuna"]
+
+# El mismo valor visto desde el lado de Moodle: el plugin lo lee de un fichero del dataroot, y
+# los scripts de instalación / la documentación lo escriben con nombres distintos.
+[[rules]]
+id = "encuestas-zajuna-sso-secret-moodle"
+description = "Secreto del pase Zajuna en su forma del lado Moodle (dataroot / ajuste del plugin)"
+regex = '''(?i)(secreto|secret|sso_secret|encuestas_secret)[a-z_]*[ \t]*[:=][ \t]*['"]?([0-9a-f]{64})['"]?'''
+secretGroup = 2
+tags = ["sso", "critico", "zajuna"]
+
+# --- 2. El fichero secreto.txt del plugin ----------------------------------------------------
+# 64 hex a pelo, sin nombre de variable delante: solo se caza por la RUTA del fichero.
+[[rules]]
+id = "encuestas-secreto-txt"
+description = "plugin-encuestas-zajuna/secreto.txt versionado — es el secreto del SSO en claro"
+regex = '''[0-9a-f]{64}'''
+path = '''(^|/)secreto\.txt$'''
+tags = ["sso", "critico", "zajuna"]
+
+# --- 3. APP_KEY de Laravel -------------------------------------------------------------------
+# Se excluye el marcador de `.env.example` (`base64:your-32-character-secret-key-here`), que no es
+# una clave: castigar la plantilla que el equipo hizo bien es el defecto L-R2-04.
+[[rules]]
+id = "encuestas-laravel-app-key"
+description = "APP_KEY de Laravel — cifra sesiones y todo lo que pase por Crypt"
+regex = '''(?i)APP_KEY[ \t]*[:=][ \t]*['"]?(base64:[A-Za-z0-9+/]{40,}={0,2})['"]?'''
+secretGroup = 1
+tags = ["laravel", "critico"]
+  [rules.allowlist]
+  regexes = ['''(?i)your-32-character|tu-clave|change-?me|xxxx''']
+
+# --- 4 y 5. Contraseñas de base de datos -----------------------------------------------------
+# ZAJUNA_DB_PASSWORD (réplica de Moodle: datos personales de 20.070 usuarios) y DB_PASSWORD (las
+# respuestas de las encuestas). Solo la ASIGNACIÓN en ficheros de entorno/despliegue: en el código
+# PHP `DB_PASSWORD` aparece dentro de `env('DB_PASSWORD')`, que es una lectura, no un secreto.
+[[rules]]
+id = "encuestas-db-password"
+description = "Contraseña de base de datos asignada en un fichero de entorno o de despliegue"
+regex = '''(?i)(ZAJUNA_DB_PASSWORD|DB_PASSWORD|POSTGRES_PASSWORD)[ \t]*[:=][ \t]*['"]?([^\s'"#$]{8,})['"]?'''
+secretGroup = 2
+path = '''(\.env($|\.)|docker-compose.*\.ya?ml$|\.ini$|\.sql$|Dockerfile|\.sh$)'''
+tags = ["db", "zajuna"]
+  [rules.allowlist]
+  # `null` y `secret` son los valores de .env.example; los del compose LOCAL son de juguete y
+  # están a la vista a propósito. Un valor de ejemplo no es una fuga.
+  # Marcadores que ESTE equipo usa de verdad, leídos del triaje de la primera corrida:
+  # `CAMBIAR` en .env.production.example y `la_contraseña_que_eligió` en un COMENTARIO de
+  # docs/zajuna/setup_zajuna_reader.sql. Son documentación bien hecha; marcarlas es el defecto
+  # L-R2-04 otra vez.
+  regexes = ['''(?i)(null|secret|password|changeme|encuestas|postgres|example|tu-clave|fuerte|cambiar|la_contrase|que_eligi)''']
+
+# --- 6. Contraseña de los PDF exportados -----------------------------------------------------
+[[rules]]
+id = "encuestas-export-pdf-password"
+description = "EXPORT_PDF_PASSWORD — abre los PDF de reporte descargados"
+regex = '''(?i)EXPORT_PDF_PASSWORD[ \t]*[:=][ \t]*['"]?([^\s'"#]{6,})['"]?'''
+secretGroup = 1
+tags = ["export"]
+
+# --- 7. Correo saliente ----------------------------------------------------------------------
+# El proyecto envía correo de verdad (SendSurveyEmailJob, recordatorios del scheduler).
+[[rules]]
+id = "encuestas-mail-password"
+description = "MAIL_PASSWORD — credencial del servidor SMTP real"
+regex = '''(?i)MAIL_PASSWORD[ \t]*[:=][ \t]*['"]?([^\s'"#]{6,})['"]?'''
+secretGroup = 1
+tags = ["smtp"]
+  [rules.allowlist]
+  # `CAMBIAR` es el marcador de .env.production.example de este equipo.
+  regexes = ['''(?i)(null|mailpit|password|changeme|cambiar)''']
+
+# --- 8. userlist.txt de PgBouncer ------------------------------------------------------------
+# El README-DESPLIEGUE pide generarlo con el hash SCRAM real. El `.example` es correcto; el otro
+# sería la credencial de la base de producción dentro del repositorio.
+[[rules]]
+id = "encuestas-pgbouncer-userlist"
+description = "userlist.txt de PgBouncer con hash SCRAM/MD5 real (credencial de BD de producción)"
+regex = '''"(SCRAM-SHA-256\$[^"]+|md5[0-9a-f]{32})"'''
+secretGroup = 1
+path = '''userlist\.txt$'''
+tags = ["db", "pgbouncer"]
+
+# --- Proveedores externos declarados en .env.example ------------------------------------------
+# AWS y Pusher los cubre el conjunto por defecto de gitleaks; Pusher se deja explícito porque
+# este `.env.example` lo declara y por tanto es una forma que ESTE proyecto puede llegar a usar.
+[[rules]]
+id = "encuestas-pusher-secret"
+description = "PUSHER_APP_SECRET — canal de eventos en tiempo real"
+regex = '''(?i)PUSHER_APP_SECRET[ \t]*[:=][ \t]*['"]?([A-Za-z0-9]{16,})['"]?'''
+secretGroup = 1
+tags = ["pusher"]
+
+# =============================================================================================
+#  RUIDO QUE HAY QUE CALLAR, con su razón. Cada exclusión acota la cobertura: va justificada.
+# =============================================================================================
+[allowlist]
+description = "Rutas que no pueden contener un secreto de producción de este proyecto"
+paths = [
+  # Dependencias de terceros. Auditarlas es la dimensión `deps`, no `secrets`.
+  '''(^|/)vendor/''',
+  '''(^|/)node_modules/''',
+  # Compilado del SPA: es un derivado de src/, y si un secreto llegó ahí, el hallazgo está en el
+  # fuente. Reportar los dos es contar la misma fuga dos veces.
+  '''(^|/)(dist|build)/''',
+  # Plantillas: declaran QUÉ variables existen, con valores de mentira. Es lo que el equipo hizo
+  # BIEN. Marcarlas es exactamente el defecto L-R2-04 (castigar al documento bueno).
+  '''\.env\.example$''',
+  '''userlist\.txt\.example$''',
+  # Lockfiles: hashes de integridad, no secretos.
+  '''(^|/)(composer\.lock|package-lock\.json|yarn\.lock|bun\.lock)$''',
+]
+regexes = [
+  # La contraseña de la cohorte de demo que creó el LABORATORIO en el core local. Vive en
+  # target.env.local (que ni se versiona) y puede aparecer en evidencias. No es una credencial
+  # del proyecto auditado: es nuestra, y ya está declarada en el informe.
+  '''DemoAntiplagio2026#''',
+  # `Authorization: Bearer YOUR_TOKEN` en PAGINACION_IMPLEMENTADA.md — cuatro veces, dentro de
+  # ejemplos de `curl` contra `http://tu-api.com`. Lo marca la regla `curl-auth-header` del
+  # conjunto POR DEFECTO de gitleaks, que no distingue un marcador de un token. Es documentación
+  # de API escrita como se debe.
+  '''YOUR_TOKEN''',
+  # El secreto de mentira de las pruebas del plugin: `config(['zajuna_sso.secret' =>
+  # 'secreto-compartido-de-prueba-32-bytes-ok'])` en PluginZajunaSeguridadTest.php. Lo marca
+  # `generic-api-key` del conjunto por defecto. Se excluye por VALOR y no por ruta: excluir
+  # `tests/` entero cegaría la búsqueda en las 20.379 líneas de pruebas nuevas de la rama
+  # auditada, que es justo donde alguien pega una credencial real «solo para probar».
+  '''secreto-compartido-de-prueba''',
+]

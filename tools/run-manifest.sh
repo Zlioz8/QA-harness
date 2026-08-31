@@ -14,6 +14,7 @@ ENVFILE="targets/$TARGET/target.env"
 # up empty, and the manifest then records "(not a git checkout)" for a perfectly normal git repo.
 # A manifest that misreports which commit was audited is worse than no manifest.
 . "$(dirname "$0")/lib-env.sh"   # one parser for target.env — see the file for why
+. "$(dirname "$0")/lib-repos.sh" # one discoverer of repos under SRC_PATH — idem
 SRC_PATH=$(envget SRC_PATH)
 PERF_CPUS=$(envget PERF_CPUS)
 PERF_MEM=$(envget PERF_MEM)
@@ -30,11 +31,8 @@ OUT="$R/RUN.md"
 # changes or the branch was behind the remote. NOTHING here touches the network: `git fetch`
 # is the operator's call, and a manifest that silently fetched would report a comparison the
 # auditor never authorised.
-mapfile -t repo_rels < <(
-  if [ -d "${SRC_PATH:-}/.git" ]; then echo "."; else
-    for d in "${SRC_PATH:-.}"/*/; do [ -d "$d.git" ] && basename "$d"; done
-  fi
-)
+mapfile -t repo_rels < <(discover_repos "${SRC_PATH:-}")
+mapfile -t outside   < <(non_repo_entries "${SRC_PATH:-}")
 
 repo_row() {   # $1 = path relative to SRC_PATH
   local rel="$1" dir head branch dirty up ahead behind sync
@@ -75,6 +73,30 @@ repo_row() {   # $1 = path relative to SRC_PATH
     echo "manifest never fetches. Run \`git fetch\` before the audit if the comparison must be current."
   fi
   echo
+
+  # What was deliberately left OUT of the code analysis.
+  #
+  # The code dimensions (semgrep, Trivy, Syft, Qodana) used to mount SRC_PATH whole. When the
+  # profile points at a PARENT directory — which the contract in targets/_template/target.env
+  # explicitly tells it to do for multi-repo projects — that parent is somebody's working folder:
+  # deployment manuals in .docx, screenshots, MCP console logs from a different project. Those
+  # got scanned and their findings were published as coverage of THIS project.
+  #
+  # Now they are excluded (tools/lib-repos.sh, tools/run-dimension.sh). This block is the other
+  # half of that fix: an exclusion nobody can see is just the same defect from the other side.
+  # A reader of this manifest must be able to challenge the boundary, so the boundary is printed.
+  if [ "${#outside[@]}" -gt 0 ]; then
+    echo "### Outside the code analysis"
+    echo
+    echo "\`${SRC_PATH:-?}\` is a parent directory, and only the repositories above were analysed."
+    echo "These ${#outside[@]} entries live under it and were **not** scanned by semgrep, Trivy, Syft or Qodana:"
+    echo
+    for e in "${outside[@]}"; do echo "- \`$e\`"; done
+    echo
+    echo "This is deliberate: they are not part of the audited project. If any of them IS part of"
+    echo "it, the boundary is wrong — fix \`SRC_PATH\` rather than reading this list as coverage."
+    echo
+  fi
   echo "## Coverage"
   echo
   echo "| Dimension | Artifact | Ran |"

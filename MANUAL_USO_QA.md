@@ -319,11 +319,9 @@ make image-scan  TARGET=proyecto_x IMAGE=mi-repo:tag
 ### Mapa completo: comando → qué mide → artefacto
 
 <!-- dimensiones:inicio -->
-
-_Tabla generada de `lib/dimensions.yml` con `tools/dimensions.py --markdown`. No la edites a mano: `make doc-check` falla si diverge del registro._
-
 | Dimensión | Herramienta | Comando | Artefacto | Runtime |
 |---|---|---|---|---|
+| Contrato de despliegue | ingest-deploy | `make ingest-deploy` | `deploy-contract.sarif` | no |
 | Secretos en la historia git | gitleaks | `make secrets` | `gitleaks.sarif` | no |
 | Secretos verificados en vivo | TruffleHog | `make secrets` | `trufflehog.sarif` | no |
 | Dependencias / CVE | Trivy fs | `make deps` | `trivy/trivy-fs.sarif` | no |
@@ -340,8 +338,8 @@ _Tabla generada de `lib/dimensions.yml` con `tools/dimensions.py --markdown`. No
 | Autorización y flujos (E2E) | Playwright | `make e2e` | `playwright/results.json` | **sí** |
 | Carga (k6) | k6 | `make perf` | `k6/summary.json` | **sí** |
 | Carga (JMeter) | JMeter | `make perf-jmeter` | `jmeter/results.jtl` | **sí** |
+| Flujos de usuario en navegador (MCP) | Playwright MCP | `make mcp-journey` | `mcp/journeys.md` | **sí** |
 | Jornadas en dispositivo real (adb) | adb | `make device-e2e` | `device/jornadas.md` | **sí** |
-
 <!-- dimensiones:fin -->
 
 **Qué NO cubre `dast`:** ZAP recorre la aplicación **sin sesión**. Un reporte de ZAP limpio no dice

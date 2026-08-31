@@ -1,0 +1,71 @@
+# gitleaks — reglas escritas PARA anuncios_del_curso (mod_imagecarousel), no el ejemplo genérico.
+#
+# QUÉ ES ESTE PROYECTO, y por qué eso decide las reglas. Es UN plugin de actividad de Moodle:
+# 34 ficheros desplegables, PHP (puntos de entrada + classes) y un puñado de JS/Mustache. NO es
+# una aplicación con su propia capa de configuración: verificado sobre el árbol del commit
+# ef6c6e9 —
+#   · no hay .env, .env.example, ni ningún fichero de entorno,
+#   · no hay composer.json/package.json con credenciales de registro,
+#   · no abre NINGUNA conexión saliente con credenciales (0 coincidencias de curl_/fsockopen/
+#     new PDO/pg_connect/mysqli/Authorization:/Bearer en todo el árbol),
+#   · toda la persistencia pasa por el `$DB` de Moodle, cuya contraseña vive en el config.php del
+#     NÚCLEO —que nunca se versiona— no en este repositorio.
+# Es decir: este plugin no custodia ningún secreto propio. La regla no busca "el secreto de este
+# sistema" porque no lo hay; busca que no se haya COLADO uno por error en la historia.
+#
+# POR QUÉ LA PLANTILLA GENÉRICA MIENTE AQUÍ. Su `env-assigned-secret` marca
+# `[A-Z0-9_]*(PASSWORD|SECRET|TOKEN|APIKEY)=\S{4,}` en cualquier fichero. En un plugin de Moodle
+# la palabra que abunda es `sesskey` (el token CSRF de Moodle, que NO es un secreto que fugue: es
+# per-sesión y público en cada formulario) y `password` aparece sólo en cadenas de idioma y en
+# `require_once($CFG->libdir...)`. Todo eso saldría como fuga y enterraría una de verdad.
+[extend]
+useDefault = true
+
+# (1) Un secreto embebido como LITERAL en el código PHP: la forma real en que a un plugin sin
+# fichero de entorno se le cuela una credencial es escribiéndola a mano en una asignación.
+# Se exige comillas y un valor largo para no cazar `$password = required_param(...)`.
+[[rules]]
+id = "php-hardcoded-secret-literal"
+description = "Credencial literal embebida en PHP (no una variable ni un PARAM_)"
+regex = '''(?i)\$?[a-z0-9_]*(password|passwd|secret|apikey|api_key|token|clave)\s*=\s*['"][^'"$]{6,}['"]'''
+path = '''\.php$'''
+tags = ["php", "hardcoded"]
+
+# (2) El servidor de correo o un endpoint externo con credencial embebida, por si una versión
+# futura añade notificaciones (hoy el plugin no envía correo, pero la regla protege la historia).
+[[rules]]
+id = "smtp-or-url-with-inline-credentials"
+description = "URL con usuario:contraseña embebidos"
+regex = '''[a-z]+://[a-z0-9_.-]+:[^@\s/'"]{4,}@'''
+tags = ["url", "credentials"]
+
+# (3) Bloques de clave privada / certificado, que no deberían viajar nunca en un plugin.
+[[rules]]
+# (4) sshpass -p 'CLAVE': la forma REAL en que a este repo se le colo una credencial. El commit
+# b349833 versiono REPORTE_QA_SEGURIDAD.md con `sshpass -p 'Anti2025' ssh admin@10.217.78.124`
+# — contrasena SSH de infraestructura, en claro, en la historia. La regla .php de arriba no la
+# ve (esta en un bloque bash de un .md) y las reglas por defecto tampoco (8 chars, baja entropia).
+# semgrep si la detecto; gitleaks debe verla tambien para que "secretos en la historia" no mienta.
+id = "sshpass-inline-password"
+description = "Contrasena en claro pasada a sshpass -p"
+regex = '''sshpass\s+-p\s*['"]?[^'"\s]{3,}['"]?'''
+tags = ["ssh", "hardcoded"]
+
+[[rules]]
+id = "private-key-block"
+description = "Bloque BEGIN ... PRIVATE KEY"
+regex = '''-----BEGIN[A-Z ]*PRIVATE KEY-----'''
+tags = ["key"]
+
+# LO QUE DELIBERADAMENTE NO SE MARCA, para que las de arriba se vean:
+#   · `sesskey` / `confirm_sesskey` / `PARAM_*` — mecanismo CSRF de Moodle, no un secreto.
+#   · `get_string('password', ...)` y cadenas de lang/ — texto de interfaz.
+#   · `$CFG->...` — configuración del núcleo, resuelta en tiempo de ejecución.
+[allowlist]
+description = "Ruido conocido de un plugin de Moodle"
+regexes = [
+  '''sesskey''',
+  '''get_string\(''',
+  '''\$CFG->''',
+  '''PARAM_[A-Z]+''',
+]

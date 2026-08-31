@@ -1,0 +1,121 @@
+# Spectral — reglas escritas PARA el contrato de zea-api, no el ejemplo de la plantilla.
+#
+# EL DOCUMENTO AUDITADO: `docs/api/openapi.json` (OpenAPI 3.2.0, 10 rutas), generado por
+# `vue-app/scripts/gen-openapi.ts` y verificado en CI por `scripts/check-openapi.ts`. Es el
+# contrato del CÓDIGO, no del despliegue — dilo así en el informe.
+#
+# POR QUÉ NO SIRVE LA PLANTILLA, medido sobre este documento:
+#
+#   `seclab-operation-security-defined` mira `security` OPERACIÓN POR OPERACIÓN. Este documento
+#   declara `security: [{bearerAuth: []}]` a nivel RAÍZ y solo la sobreescribe en `/health` y
+#   `/metrics` (con `security: []`, que es la forma correcta de decir «esto es público a
+#   propósito»). Con la regla genérica, las OCHO rutas de reportes —las que sí exigen JWT— se
+#   reportarían como «sin seguridad declarada»: ocho hallazgos falsos, y los dos endpoints que de
+#   verdad están abiertos, callados. Es el caso exacto que la metodología llama medir otro
+#   proyecto con el nombre de éste.
+#
+# LO QUE SÍ PREGUNTA ESTE GUION, sacado de cómo funciona ESTA API:
+#   1. ¿La seguridad está declarada, en la raíz o en la operación?
+#   2. ¿Lo que se declara PÚBLICO es solo lo que puede serlo? `/metrics` no lo es: §17 del
+#      DEPLOY.md lo da por protegido «porque el servicio escucha en loopback», y por el proxy del
+#      servidor sí sale a internet (comprobado el 21/08/2026: 200 y 15 KB).
+#   3. ¿Toda ruta de reporte declara `courseid` como REQUERIDO? El control de acceso de este
+#      sistema es por curso: el JWT lleva un curso y la API comprueba que el pedido casa. Una
+#      operación sin `courseid` no puede aplicar esa comprobación.
+#   4. ¿La URL de producción es la que el servidor sirve de verdad?
+
+extends: ["spectral:oas"]
+
+rules:
+  # Calidad documental: no es lo que audita esta dimensión.
+  operation-tag-defined: off
+  info-contact: off
+  info-description: warn
+
+  zea-seguridad-declarada-raiz-u-operacion:
+    description: >-
+      Ninguna seguridad declarada en la raíz del documento. En esta API todo lo que no sea
+      /health exige un JWT de curso, y ese requisito se declara una vez arriba.
+    given: "$"
+    severity: error
+    then:
+      field: security
+      function: truthy
+
+  zea-solo-salud-es-publica:
+    description: >-
+      Operación que se declara PÚBLICA (`security: []`) y no es `/health`. `/metrics` publica el
+      inventario de rutas y los contadores de uso del servicio: detrás del proxy del servidor sale
+      a internet, así que declararlo público en el contrato consagra una exposición que el propio
+      DEPLOY.md (§17) da por imposible.
+    given: "$.paths[?(@property != '/health')][get,put,post,delete,patch]"
+    severity: error
+    then:
+      field: security
+      function: undefined
+
+  zea-reportes-exigen-courseid:
+    description: >-
+      Ruta bajo /api/v1/reports/ sin un parámetro `courseid` REQUERIDO. El control de acceso de
+      este sistema es por curso —`token.php` emite un JWT atado a un curso y la API comprueba que
+      el `courseid` pedido casa con el del token—, así que una operación sin `courseid` no puede
+      aplicarlo.
+    given: "$.paths[?(@property.match(/^\\/api\\/v1\\/reports\\//))][get]"
+    severity: error
+    then:
+      field: parameters
+      function: schema
+      functionOptions:
+        schema:
+          type: array
+          contains:
+            type: object
+            properties:
+              name: { const: "courseid" }
+              required: { const: true }
+            required: ["name", "required"]
+          errorMessage: falta un parámetro `courseid` declarado como required
+
+  zea-url-de-produccion-real:
+    description: >-
+      La URL de producción del contrato no coincide con la que el despliegue sirve. El documento
+      declara `/api-zea`; `deploy/nginx-moodle.conf.template` y `scripts/install-nginx.sh`
+      publican la API en `/zea-api/`. Comprobado contra el servidor el 21/08/2026:
+      `/zea-api/health` responde `{"status":"ok"}` y `/api-zea/health` devuelve 200 con el HTML
+      del CMS — un cliente generado desde este contrato no falla, que sería lo bueno: recibe un
+      200 y una página web donde esperaba JSON.
+    given: "$.servers[*].url"
+    severity: error
+    then:
+      function: pattern
+      functionOptions:
+        notMatch: "^/api-zea"
+
+  zea-sin-servidor-en-claro:
+    description: >-
+      URL de servidor en http:// que no es loopback. El despliegue de producción es HTTPS
+      (`deploy/nginx-prod-http3.conf.template`); el `http://localhost:39097` de desarrollo es
+      correcto y esta regla lo respeta.
+    given: "$.servers[*].url"
+    severity: error
+    then:
+      function: pattern
+      functionOptions:
+        notMatch: "^http://(?!localhost|127\\.0\\.0\\.1)"
+
+  zea-errores-documentados:
+    description: >-
+      Operación sin ningún 4xx documentado. Esta API distingue 400 (parámetro inválido), 401 (sin
+      JWT o caducado) y 403 (JWT válido para OTRO curso); esa distinción es el comportamiento de
+      autorización, y el contrato es donde se promete.
+    given: "$.paths[?(@property.match(/^\\/api\\/v1\\//))][get,put,post,delete,patch].responses"
+    severity: warn
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          patternProperties:
+            "^4[0-9][0-9]$": {}
+          minProperties: 1
+          errorMessage: debería describirse al menos una respuesta 4xx

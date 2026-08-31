@@ -28,6 +28,7 @@ TDIR="targets/$TARGET"
 ENVFILE="$TDIR/target.env"
 [ -f "$ENVFILE" ] || { echo "no $ENVFILE — run: make new TARGET=$TARGET"; exit 2; }
 . "$(dirname "$0")/lib-env.sh"
+. "$(dirname "$0")/lib-repos.sh"
 
 REPO_URL="${2:-$(envget REPO_URL)}"
 
@@ -66,16 +67,39 @@ FOUND_BRANCH=""; COMMIT=""; MODE=""
 
 git_at() { git -C "$1" "${@:2}"; }
 
-if [ -n "$SRC" ] && [ -d "$SRC/.git" ]; then
+# MULTI-REPO: este script era el ÚNICO consumidor de SRC_PATH que no pasaba por
+# lib-repos.sh. Exigía `$SRC/.git`, y el contrato del perfil dice que en un proyecto de
+# VARIOS repositorios SRC_PATH apunta al DIRECTORIO PADRE — que por definición no es un
+# repositorio. El resultado era «ni SRC_PATH con .git ni REPO_URL — nada que inspeccionar»,
+# o peor: si el perfil traía REPO_URL, caía al clon bare y auditaba el contrato de despliegue
+# de UN solo repositorio sin decir en ninguna parte que el otro no se miró. Le pasó a
+# reportes_de_cursos (dos repos, solo se inspeccionó Analitica_cursos).
+#
+# La regla es la misma que la del resto del laboratorio: se recorren los repositorios
+# descubiertos y se elige AQUEL QUE CONTIENE el documento. Los demás se registran, porque un
+# proyecto multi-repo con un solo DEPLOY.md es un dato del cotejo, no un detalle de
+# implementación.
+REPOS_ALL=(); REPO_WITH_DOC=""
+if [ -n "$SRC" ] && [ -d "$SRC" ]; then
+  while IFS= read -r r; do [ -n "$r" ] && REPOS_ALL+=("$r"); done < <(src_roots "$SRC")
+fi
+
+if [ "${#REPOS_ALL[@]}" -gt 0 ] && [ -d "${REPOS_ALL[0]}/.git" ]; then
   MODE="checkout local"
-  REPO="$SRC"
-  for b in $BRANCHES; do
-    if git_at "$REPO" cat-file -e "origin/$b:$DEPLOY_DOC" 2>/dev/null; then
-      FOUND_BRANCH="origin/$b"; break
-    elif git_at "$REPO" cat-file -e "$b:$DEPLOY_DOC" 2>/dev/null; then
-      FOUND_BRANCH="$b"; break
-    fi
+  for cand in "${REPOS_ALL[@]}"; do
+    [ -d "$cand/.git" ] || continue
+    for b in $BRANCHES; do
+      if git_at "$cand" cat-file -e "origin/$b:$DEPLOY_DOC" 2>/dev/null; then
+        REPO="$cand"; FOUND_BRANCH="origin/$b"; break 2
+      elif git_at "$cand" cat-file -e "$b:$DEPLOY_DOC" 2>/dev/null; then
+        REPO="$cand"; FOUND_BRANCH="$b"; break 2
+      fi
+    done
   done
+  # Ningún repositorio trae el documento: se inspecciona el primero de todos modos, para que
+  # el cotejo se emita con su CRÍTICO «no hay documento» en vez de morir sin informe.
+  REPO="${REPO:-${REPOS_ALL[0]}}"
+  REPO_WITH_DOC="$([ -n "$FOUND_BRANCH" ] && basename "$REPO")"
 elif [ -n "$REPO_URL" ]; then
   MODE="clon bare superficial"
   REPO="$WORK/bare.git"
@@ -129,7 +153,39 @@ add() {
 # «**Ausencias verificadas** (búsqueda explícita, sin resultados):». El patrón traía `ausente`
 # en singular y `sin evidencia`, así que no reconocía ninguna de las dos formas y toda la lista
 # de tecnologías que el proyecto NO usa se reportaba como ficheros prometidos y no entregados.
-ABSENCE_RE='no (hay|est|existe|se us|trae|viene)|NO están|sin (evidencia|resultados)|gitignore|no versionad|ausencias?|ausente|no se usan|sin commitear|no llegará|inexistentes?|no aplica'
+#
+# Sexta corrección, ganada con anuncios_del_curso (2026-08-25), y otra vez el mismo patrón:
+# cuanto mejor documenta un equipo una ausencia, más defectos falsos se le imputan. Su
+# DEPLOY.md §1.1 dice «**El repositorio no contiene `Dockerfile`, `docker-compose.yml`,
+# `compose.yml`, …**», una negación explícita y con búsqueda declarada. La alternancia traía
+# `no (hay|est|existe|se us|trae|viene)` y ninguna de esas formas es `contiene`, así que las
+# DOS negaciones se reportaron como ALTO: «cita `compose.yml` como si estuviera». Faltaba un
+# verbo, y el precio de que falte es una acusación al equipo por haber documentado bien.
+#
+# Séptima corrección, ganada con portafolio_del_aprendiz (2026-08-25). Dos cosas nuevas:
+#
+# (a) EL «SE» IMPERSONAL. Su DEPLOY.md §3 abre con «No se requiere Node/npm para correr el
+#     plugin» y a continuación cita `npm-shrinkwrap.json`. La alternancia listaba los verbos
+#     pegados a `no ` y trataba el reflexivo como casos sueltos (`no se us`, `no se usan`), así
+#     que «no SE requiere» no casaba con nada. El `(se )?` opcional cubre de una vez todas las
+#     formas impersonales y hace innecesarios esos parches — es la generalización que las seis
+#     correcciones anteriores fueron pidiendo de una en una.
+#
+# (b) «ESTO EXISTE, PERO NO AQUÍ», que no es una ausencia sino una declaración de ALCANCE, y no
+#     estaba contemplada como categoría. El mismo párrafo dice que esos ficheros «existen en la
+#     raíz de Moodle core […], no de este plugin — fuera de alcance». Comprobado: los tres
+#     están de verdad en /var/www/zajuna/. El documento era EXACTO y aun así se le imputó un
+#     ALTO por no traer un fichero que nunca prometió. Un plugin vive dentro de un núcleo
+#     ajeno: acotar el alcance así es lo NORMAL en este ecosistema, no un caso raro.
+#
+# Sobre el ANCHO, que costó una segunda pasada: el primer intento añadió también
+# `pertenecen? a(l)? (núcleo|core|Moodle)` y `de(l| la) (núcleo|core) de`. Medido contra los
+# seis DEPLOY.md ya congelados, eso eximía citas en adi (`docker-compose.yml`, `index.php`) y
+# en reportes_de_cursos (`package.json`, `bun.lock`) — prosa corriente que menciona «del core»
+# sin negar nada. Un vocabulario de exención demasiado ancho no produce un falso positivo:
+# produce un falso NEGATIVO, que es peor porque nadie lo ve — se manifiesta como un informe
+# más limpio. Se dejan solo las formas que nombran otro ÁRBOL de forma inequívoca.
+ABSENCE_RE='no (se )?(hay|est|existe|us|trae|viene|contien|incluy|posee|requier)|NO están|sin (evidencia|resultados)|gitignore|no versionad|ausencias?|ausente|sin commitear|no llegará|inexistentes?|no aplica|fuera de (alcance|este repo)|en la ra[íi]z de Moodle|no (forma|forman) parte de este repo'
 
 # Files already reported by the manifest check, so the citation check does not repeat them.
 REPORTED=""
@@ -149,33 +205,45 @@ fi
 # GITIGNORED is worse: a clean clone does not even contain it, so `install` fails outright and
 # the dependency-CVE dimension of this audit has nothing to read. That absence must never be
 # mistaken for "no vulnerable dependencies".
+#
+# EL LOCK NO ES UNO SOLO, y darlo por sentado produjo una acusación falsa. Quinta corrección,
+# ganada con reportes_de_cursos (2026-08-21): su `vue-app/` usa **bun**, versiona `bun.lock`
+# (103 KB) y el contenedor del front corre `bun install --frozen-lockfile`, o sea que el lock
+# manda de verdad. El hallazgo emitido fue «vue-app/package.json sin su package-lock.json»,
+# ALTO, y era falso: lo que faltaba era el lock DE OTRO gestor. El segundo argumento pasa a ser
+# la lista de locks ACEPTABLES, separados por `|`; basta con que exista uno.
 check_manifest() {
-  local manifest="$1" lock="$2" ecosystem="$3"
+  local manifest="$1" locks="$2" ecosystem="$3"
+  local primero="${locks%%|*}"
+  local legible; legible=$(printf '%s' "$locks" | tr '|' ' ')
   local anywhere; anywhere=$(tree | grep -E "(^|/)$manifest$" | head -1)
   if [ -z "$anywhere" ]; then
     if is_ignored "$manifest"; then
       add CRITICO "$manifest está en .gitignore y no existe en el repositorio" \
           "ecosistema $ecosystem · un clon limpio no lo trae: 'install' falla y NO hay dimensión de CVE de dependencias"
-      REPORTED="$REPORTED $manifest $lock"
+      REPORTED="$REPORTED $manifest $legible"
     fi
     return
   fi
   local dir; dir=$(dirname "$anywhere"); [ "$dir" = "." ] && dir=""
-  local lockpath="${dir:+$dir/}$lock"
-  if ! has "$lockpath"; then
-    if is_ignored "$lock"; then
-      add CRITICO "$lock está en .gitignore" \
-          "$anywhere existe pero su lock no se versiona: las versiones instaladas no son reproducibles ni auditables"
-      REPORTED="$REPORTED $lock"
-    else
-      add ALTO "$anywhere sin su $lock" \
-          "sin lock, cada instalación resuelve versiones distintas: el CVE que se mida no es el que corre en producción"
-      REPORTED="$REPORTED $lock"
-    fi
+  local lock encontrado="" ignorado=""
+  for lock in ${locks//|/ }; do
+    if has "${dir:+$dir/}$lock"; then encontrado="$lock"; break; fi
+    is_ignored "$lock" && ignorado="$lock"
+  done
+  [ -n "$encontrado" ] && return
+  if [ -n "$ignorado" ]; then
+    add CRITICO "$ignorado está en .gitignore" \
+        "$anywhere existe pero su lock no se versiona: las versiones instaladas no son reproducibles ni auditables"
+  else
+    add ALTO "$anywhere sin lock ($legible)" \
+        "sin lock, cada instalación resuelve versiones distintas: el CVE que se mida no es el que corre en producción"
   fi
+  REPORTED="$REPORTED $legible"
+  : "$primero"
 }
 check_manifest composer.json    composer.lock      PHP/Composer
-check_manifest package.json     package-lock.json  Node/npm
+check_manifest package.json     'package-lock.json|yarn.lock|pnpm-lock.yaml|bun.lock|bun.lockb|npm-shrinkwrap.json'  Node
 check_manifest requirements.txt requirements.txt   Python/pip
 check_manifest pyproject.toml   poetry.lock        Python/poetry
 check_manifest go.mod           go.sum             Go
@@ -218,15 +286,52 @@ if [ "$DEPLOY_PRESENT" = yes ]; then
       # despliegue, mas defectos falsos se le imputaban. Un revisor que ve cinco acusaciones
       # falsas deja de leer la seccion entera — y ahi es donde estan los hallazgos de verdad.
       config|*/config)                       continue ;;
-      *.conf)                                continue ;;   # apache2.conf, postgresql.conf, nginx.conf, php.ini-*
+      *.conf)                                continue ;;   # apache2.conf, postgresql.conf, nginx.conf
+      *.ini)                                 continue ;;   # php.ini y compañía: son del HOST, no del repo.
+                                                           # reportes_de_cursos citaba `php.ini` para decir
+                                                           # que NO se edita ("se pone en conf.d, no editando
+                                                           # php.ini") y se le imputó como archivo prometido.
       admin/*|lib/*|*/lib/*.class.php)       continue ;;   # arbol de Moodle core
       *.class.php)                           continue ;;   # convencion de librerias de Moodle core
       config.php|*/config.php)               continue ;;   # config.php de Moodle: NUNCA se versiona
+
+      # Cuarta correccion, ganada con analitica_notificaciones, y la misma leccion que las tres
+      # anteriores: cuanto mejor documenta un equipo su integracion, mas defectos falsos se le
+      # imputaban. Su DEPLOY.md explica el SSO citando `login/token.php` — el ENDPOINT de Moodle
+      # contra el que la aplicacion hace POST para obtener el wstoken (api/moodle_auth.py:
+      # f"{settings.moodle_url}/login/token.php"). No es un archivo de este repositorio, no puede
+      # serlo, y exigirlo produjo un ALTO que dice, literalmente, que falta un fichero del nucleo
+      # de Moodle en un proyecto que no es Moodle.
+      #
+      # La regla de fondo: una cita puede ser una RUTA HTTP de un sistema externo, no una
+      # referencia a un archivo del arbol. El script no sabe distinguirlas en general, pero si
+      # conoce los directorios de entrada de Moodle, que es contra lo que se integra media
+      # fabrica.
+      login/*|*/login/*)                     continue ;;   # login/token.php, login/logout.php: endpoints de Moodle
+      webservice/*|*/webservice/*)           continue ;;   # webservice/rest/server.php: idem
     esac
     has "$cand" && continue
     tree | grep -qE "^$(printf '%s' "$cand" | sed 's|[.[\*^$]|\\&|g')/" && continue
     # Match by basename too: DEPLOY.md says `phpunit.xml`, the repo has dashboard/phpunit.xml.
     tree | grep -qE "(^|/)$(basename "$cand" | sed 's|[.[\*^$]|\\&|g')$" && continue
+
+    # Septima correccion, ganada con anuncios_del_curso (2026-08-25). Hermana de la de
+    # `login/*` de arriba, y por la misma razon de fondo: media fabrica se integra CONTRA
+    # Moodle, y un documento de despliegue bueno cita los scripts CLI del nucleo.
+    #
+    # El caso `admin/*` del case de arriba ya cubria la forma con directorio, pero la cita
+    # llega muchas veces por su BASENAME: DEPLOY.md escribe el comando completo
+    # `sudo -u www-data php /var/www/zajuna/admin/cli/uninstall_plugins.php` y luego se refiere
+    # a el en prosa como «`uninstall_plugins.php` corre en dry-run salvo que pases --run». Solo
+    # el segundo entra por el extractor (el primero empieza por `/` y el patron exige
+    # alfanumerico), asi que `$cand` es un basename pelado y `admin/*` no casa.
+    #
+    # Se decide con la evidencia del PROPIO documento en vez de con una lista de nombres: si
+    # el texto muestra ese fichero bajo `admin/cli/`, es del nucleo de Moodle y no puede estar
+    # en el repositorio de un plugin. Exigirlo produce un ALTO que dice, literalmente, que al
+    # plugin le falta un fichero de Moodle.
+    grep -qE "admin/cli/$(basename "$cand" | sed 's|[.[\*^$]|\\&|g')([^A-Za-z0-9_.-]|$)" \
+      "$TDIR/DEPLOY.md" && continue
 
     # Already reported by the manifest check above, with better evidence. Saying it twice at
     # two severities makes the reader distrust both entries.
@@ -244,6 +349,27 @@ if [ "$DEPLOY_PRESENT" = yes ]; then
     # ... inexistentes» y a continuacion la lista, envuelta a varias lineas, donde cae
     # `pom.xml`. Mirando solo la linea de la cita, la enumeracion parecia una afirmacion de
     # presencia y se reportaba como contradiccion.
+    #
+    # -A2 desde portafolio_del_aprendiz (2026-08-25): la ventana solo miraba hacia ATRAS, y esa
+    # asimetria no responde a nada — un documento puede nombrar el fichero y CALIFICARLO en la
+    # frase siguiente igual de bien que en la anterior. Su §3 lo hace: cita
+    # `npm-shrinkwrap.json` al final de una linea y explica dos lineas mas abajo que vive «en la
+    # raiz de Moodle core […] fuera de alcance». Con -B2 la calificacion caia fuera de la
+    # ventana y el ALTO salia aunque el vocabulario de ABSENCE_RE ya lo reconociera. Las dos
+    # mitades del arreglo hacen falta: el verbo Y la ventana.
+    # LA VENTANA SE QUEDA EN -B2, y esto se midió antes de tocarla. Al arreglar el falso
+    # positivo de portafolio_del_aprendiz pareció natural mirar también hacia ADELANTE (-A1),
+    # porque ahí la calificación va después de la cita. Medido sobre los seis DEPLOY.md ya
+    # congelados, ese solo cambio eximía TRECE citas que hoy se reportan: `docker-compose.yml`
+    # e `index.php` en adi, `pg_hba.conf` en analitica_notificaciones, `package.json`,
+    # `bun.lock`, `ci.yml`, `setup.sh` y dos `version.php` en reportes_de_cursos. Ninguna por
+    # una negación: por arrastrar la primera línea del párrafo siguiente, que en un documento de
+    # despliegue casi siempre contiene un «no hay» sobre OTRA cosa.
+    #
+    # Ampliar la ventana no produce un falso positivo, produce un falso NEGATIVO — y ese nadie
+    # lo ve, porque se manifiesta como un informe más limpio. El caso que motivó todo esto se
+    # resuelve en el VOCABULARIO (ver ABSENCE_RE), que es preciso, y no en la ventana, que no
+    # distingue de qué habla la frase que arrastra.
     ctx=$(grep -B2 -F -- "\`$cand\`" "$TDIR/DEPLOY.md" | head -9)
     printf '%s' "$ctx" | grep -qiE "$ABSENCE_RE" && continue
     add ALTO "DEPLOY.md cita \`$cand\` como si estuviera, pero no está en el repositorio" \
@@ -282,8 +408,17 @@ fi
 # ignorado.
 if has .env.example || has .env.sample || has .env.dist; then
   :
+# Segunda pasada del mismo defecto, con portafolio_del_aprendiz (2026-08-25). Su DEPLOY.md §6
+# dice: «Este proyecto **no usa archivos `.env`** (no existe `.env`, `.env.example` ni
+# `.env.template` en el repo)» — y a continuacion documenta la configuracion REAL en dos tablas
+# (config.php de Moodle, y mdl_config_plugins via settings.php del plugin). Es exactamente la
+# respuesta que esta comprobacion busca, dada con mas precision que el ejemplo que la exime:
+# nombra `.env.example` LITERALMENTE para decir que no existe. Y aun asi se emitia el MEDIO,
+# porque la alternancia exigia la palabra «variables de entorno» y este documento habla de los
+# FICHEROS. La pregunta que importa es «¿el documento declara como se configura esto?», no con
+# que sustantivo lo declara. Se acepta tambien la negacion sobre los ficheros.
 elif [ "$DEPLOY_PRESENT" = yes ] && \
-     grep -qiE 'no (usa|hay|existen?) (ninguna )?variables? de entorno|no environment variables|\.env\*?: *inexistentes' \
+     grep -qiE 'no (usa|hay|existen?) (ninguna )?variables? de entorno|no environment variables|\.env\*?: *inexistentes|no (usa|hay|existen?|se usan) .{0,20}(archivos?|ficheros?) `?\.env|no existe `?\.env' \
           "$TDIR/DEPLOY.md" 2>/dev/null; then
   :
 else
@@ -292,11 +427,27 @@ else
 fi
 
 # --- CI: is any of this checked automatically, ever ---
-if has .gitlab-ci.yml || tree | grep -q '^\.github/workflows/' || has Jenkinsfile; then
+#
+# EL `grep -q` DE UNA TUBERÍA NO SE PUEDE PROBAR CON `pipefail`, y esto emitió una acusación
+# falsa. Medido el 2026-08-21 sobre reportes_de_cursos, que SÍ trae `.github/workflows/ci.yml` y
+# `gate.yml`: `grep -q` cierra la tubería en la primera coincidencia, `git ls-tree` muere con
+# SIGPIPE, y con `set -o pipefail` (línea 24) la tubería entera devuelve 141. La condición se lee
+# como «no hay CI» justo cuando SÍ la hay, y cuantos más archivos tenga el repositorio —más
+# probable que git aún estuviera escribiendo— más seguro es el fallo.
+#
+#   $ bash -c 'set -o pipefail; git ls-tree -r --name-only dev | grep -q "^\.github/"; echo $?'
+#   141
+#
+# La salida del árbol se materializa ANTES de filtrarla. `.gitea/workflows/` va incluido porque
+# la fábrica se aloja en Gitea, y acusar de «sin CI» a quien usa las acciones de su propio
+# servidor sería la misma clase de error.
+ARBOL_CI="$(tree)"
+if has .gitlab-ci.yml || has Jenkinsfile \
+   || grep -q -e '^\.github/workflows/' -e '^\.gitea/workflows/' -e '^\.circleci/' <<< "$ARBOL_CI"; then
   :
 else
   add MEDIO "Sin integración continua" \
-      "ni .gitlab-ci.yml ni .github/workflows ni Jenkinsfile: nada verifica el proyecto salvo esta auditoría"
+      "ni .gitlab-ci.yml ni .github/.gitea/workflows ni Jenkinsfile: nada verifica el proyecto salvo esta auditoría"
 fi
 
 # --- things that should never be committed, checked against what IS committed ---
@@ -337,9 +488,22 @@ M=$(count_sev MEDIO)
   echo "# Contrato de despliegue — $TARGET"
   echo
   echo "- fecha: $(date -Is)"
-  echo "- origen: \`${REPO_URL:-$SRC}\` · rama \`${FOUND_BRANCH:-—}\` · commit \`$COMMIT\` ($MODE)"
+  echo "- origen: \`${REPO_URL:-$REPO}\` · rama \`${FOUND_BRANCH:-—}\` · commit \`$COMMIT\` ($MODE)"
+  echo "- documento buscado: \`$DEPLOY_DOC\`"
   echo "- DEPLOY.md: $([ "$DEPLOY_PRESENT" = yes ] && echo "presente, congelado en \`$TDIR/DEPLOY.md\`" || echo '**AUSENTE**')"
   echo "- ramas consultadas, en orden: \`$(echo "$BRANCHES" | tr ' ' '/')\`"
+  # Multi-repo: qué árbol se cotejó y cuáles NO. Sin esta línea, un cotejo sobre uno de dos
+  # repositorios se lee como un cotejo sobre el proyecto entero.
+  if [ "${#REPOS_ALL[@]}" -gt 1 ]; then
+    echo "- **proyecto multi-repositorio** ($((${#REPOS_ALL[@]})) repos bajo \`$SRC\`):"
+    for r in "${REPOS_ALL[@]}"; do
+      if [ "$r" = "$REPO" ]; then
+        echo "  - \`$(basename "$r")\` — **cotejado** (es el que trae \`$DEPLOY_DOC\`)"
+      else
+        echo "  - \`$(basename "$r")\` — NO cotejado: no contiene \`$DEPLOY_DOC\` en \`$(echo "$BRANCHES" | tr ' ' '/')\`. El contrato de despliegue de este componente NO está verificado por este documento."
+      fi
+    done
+  fi
   echo
   echo "## Pregunta que responde este documento"
   echo

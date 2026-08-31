@@ -33,7 +33,20 @@ import { loginAs, hasRole, writeHeaders, Role, BASE } from '../auth/index';
 type Rule = { path: string; method?: string; allow: Role[]; note?: string; body?: unknown };
 
 const FILE = 'authz-matrix.json';
-const rules: Rule[] = fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : [];
+
+// Expande ${VAR} en las rutas de la matriz con el valor del entorno. Existe porque el control de
+// acceso de algunos sistemas se ejercita SOBRE UN IDENTIFICADOR concreto —un curso, un contexto,
+// el id de otro usuario— que no es secreto pero cambia entre despliegues y depende de qué cuenta
+// juega cada rol. Escribir ese id a mano en un archivo versionado ata la matriz a un entorno y a
+// unas cuentas; declararlo como `?courseid=${ZEA_COURSE_A}` mantiene la política declarativa y el
+// dato en el perfil (target.env), que es donde vive el resto de la configuración por despliegue.
+// Un ${VAR} sin valor se deja tal cual y la ruta fallará de forma ruidosa, no en silencio.
+const expandVars = (s: string): string =>
+  s.replace(/\$\{([A-Z0-9_]+)\}/g, (m, name) => process.env[name] ?? m);
+
+const rules: Rule[] = (fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : []).map(
+  (r: Rule): Rule => ({ ...r, path: expandVars(r.path) }),
+);
 
 // Ritmo opcional entre comprobaciones. Un backend con limitador por usuario (Costos Web:
 // throttle:60,1) responde 429 a una matriz que dispara decenas de peticiones seguidas, y ese

@@ -17,6 +17,7 @@ REPORTS="reports/$TARGET/mobile"
 mkdir -p "$REPORTS"
 
 . "$(dirname "$0")/lib-env.sh"   # one parser for target.env — values may contain spaces
+. "$(dirname "$0")/lib-repos.sh" # one discoverer of repos under SRC_PATH — same reasoning
 
 SRC_PATH=$(envget SRC_PATH)
 APK_PATH=$(envget MOBILE_ARTIFACT)
@@ -50,15 +51,20 @@ fi
 
 # The artifact must be newer than the code it claims to represent, or the audit describes a
 # binary that no longer exists. Warn rather than refuse: sometimes an old build IS the subject.
-for repo in "$SRC_PATH"/*/; do
-  [ -d "$repo.git" ] || continue
+#
+# This loop used to be its own hand-written `for repo in "$SRC_PATH"/*/` — the fourth copy of the
+# discovery rule, and the only one that got it WRONG: it looked exclusively at subdirectories, so
+# on a single-repo mobile project (SRC_PATH being the checkout itself) the staleness check never
+# fired at all. Silently. That is the exact cost of copying a rule instead of sharing it.
+while IFS= read -r repo; do
+  [ -n "$repo" ] || continue
   head_ts=$(git -C "$repo" log -1 --format=%ct 2>/dev/null) || continue
   apk_ts=$(stat -c %Y "$FULL")
   if [ "$apk_ts" -lt "$head_ts" ]; then
     echo "  WARNING: $(basename "$repo") HEAD ($(date -d @"$head_ts" +%F)) is newer than the artifact ($(date -d @"$apk_ts" +%F))."
     echo "           Findings will describe a bundle that predates the current code."
   fi
-done
+done < <(src_roots "$SRC_PATH")
 
 echo "mobile-scan: starting MobSF (127.0.0.1:$PORT)"
 $DC --profile mobile up -d mobsf >/dev/null 2>&1 || { echo "could not start mobsf"; exit 1; }

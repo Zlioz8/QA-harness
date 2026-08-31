@@ -1,0 +1,148 @@
+# Reglas propias del laboratorio para plugins de Moodle.
+#
+# Por qué existen: los paquetes públicos de semgrep buscan vulnerabilidades clásicas — inyección,
+# XSS, criptografía. No conocen el modelo de acceso de Moodle, que es donde vive el riesgo real de
+# un plugin. Y la cobertura de PHP de esos paquetes es fina: medido sobre local_portafolio
+# (2026-08-25), `p/security-audit + p/secrets + p/owasp-top-ten` cargan **725 reglas de las que
+# solo 23 son de PHP** — 200 son de python, 90 de java, 62 de terraform. El «0 hallazgos» que
+# devolvieron sobre 44 ficheros PHP era el resultado de 23 reglas, no de una revisión.
+#
+# La fábrica de Zajuna audita plugins de Moodle continuamente (portafolio, anuncios, slider,
+# antiplagio, gamificación, foros…), así que estas reglas viven en lib/ y no en un perfil: son
+# modos de fallo del FRAMEWORK, igual que laravel-vue.yml y capacitor-android.yml.
+#
+# Uso: SEMGREP_CONFIG en target.env incluye --config=/seclab-lib/semgrep/moodle-plugin.yml
+rules:
+
+  # ---------------------------------------------------------------------------------------
+  # 1. La página lee un `userid` ajeno y carga a ESE usuario sin comprobar ninguna capability.
+  #
+  # Es el IDOR canónico de un plugin de Moodle: `optional_param('userid', …)` seguido de
+  # `core_user::get_user($id)` o `$DB->get_record('user', …)`, y ni un `has_capability` ni un
+  # `require_capability` en todo el fichero. `require_login()` NO basta: acredita que hay sesión,
+  # no que esa sesión pueda ver a ESE usuario.
+  #
+  # El patrón se comprobó contra local_portafolio, donde el control SÍ está bien hecho: las 14
+  # páginas delegan en un resolvedor común (`local_portafolio_resolve_target_user`) que exige la
+  # capability y la matrícula. Esta regla no dispara ahí — y ese es justamente el punto: distingue
+  # el plugin que centraliza la comprobación del que la olvida en una página suelta. Un plugin
+  # crece añadiendo páginas, y la página nueva es la que se olvida.
+  - id: moodle-userid-ajeno-sin-capability
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Esta página acepta un `userid` por parámetro y carga ese usuario, pero en el fichero no
+      aparece ninguna comprobación de capability (has_capability / require_capability). require_login()
+      solo acredita que hay sesión. Sin una comprobación explícita, cualquier usuario autenticado
+      puede leer los datos de otro cambiando el parámetro en la URL.
+    metadata:
+      category: security
+      technology: [moodle]
+      confidence: MEDIUM
+      cwe:
+        - "CWE-639: Authorization Bypass Through User-Controlled Key"
+      owasp:
+        - "A01:2021 Broken Access Control"
+      references:
+        - https://moodledev.io/docs/apis/subsystems/access
+    # SE EXPRESA COMO SECUENCIA, y no como «no hay capability en el fichero», porque semgrep no
+    # tiene un operador para «ausente en todo el fichero» y el intento de simularlo con
+    # `pattern-not-inside: ... require_capability(...) ...` NO PARSEA en PHP
+    # (Stdlib.Parsing.Parse_error, comprobado con `semgrep --validate`).
+    #
+    # La formulación por secuencia además es MÁS precisa: describe la forma real del fallo —el
+    # parámetro se lee, y el usuario se carga SIN que medie una comprobación— en vez de contar
+    # apariciones sueltas en el fichero. Una comprobación que existe pero ocurre después de
+    # cargar los datos no protege nada, y esta versión sí lo distingue.
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $ID = optional_param('userid', ...);
+              ...
+              core_user::get_user($ID, ...);
+          - pattern: |
+              $ID = required_param('userid', ...);
+              ...
+              core_user::get_user($ID, ...);
+          - pattern: |
+              $ID = optional_param('userid', ...);
+              ...
+              $DB->get_record('user', ...);
+      - pattern-not: |
+          $ID = $PARAM('userid', ...);
+          ...
+          require_capability(...);
+          ...
+      - pattern-not: |
+          $ID = $PARAM('userid', ...);
+          ...
+          has_capability(...);
+          ...
+      # El resolvedor centralizado: un plugin que delega la comprobación en una función común
+      # (el patrón de local_portafolio) es exactamente lo que esta regla NO debe marcar.
+      - pattern-not: |
+          $ID = $PARAM('userid', ...);
+          ...
+          $F($COURSEID, $ID);
+          ...
+
+  # ---------------------------------------------------------------------------------------
+  # SOBRE UNA TERCERA REGLA QUE SE INTENTÓ Y SE RETIRÓ: «endpoint sin require_login()».
+  #
+  # La idea era buena —todo .php alcanzable por URL bajo local/, blocks/ o mod/ debe llamar a
+  # require_login()— pero es, otra vez, una afirmación sobre la AUSENCIA de algo en el fichero
+  # entero, y semgrep no tiene forma de expresarla sin falsear. Las variantes probadas o no
+  # parseaban en PHP o marcaban ficheros correctos.
+  #
+  # Se retira a propósito. Es la misma decisión que ya tomó tools/ingest-deploy.sh cuando quitó
+  # la detección de «avisos obsoletos»: tres hallazgos sólidos ganan a ocho donde cuatro están
+  # mal, porque una sección que grita lobo es una que la gente aprende a saltarse. Esa
+  # comprobación se hace mejor a mano, y de hecho se hizo: en local_portafolio las 16 páginas
+  # llaman a local_portafolio_require_login() como primera instrucción.
+
+  # ---------------------------------------------------------------------------------------
+  # 3. Excepción de base de datos tragada en silencio.
+  #
+  # `catch (\dml_exception $e) { return []; }` convierte «la base de datos no responde» en «este
+  # usuario no tiene datos». En una pantalla de calificaciones eso no es degradar con gracia: es
+  # decirle a un aprendiz que tiene CERO resultados cuando lo que pasa es que la consulta falló.
+  # El dato equivocado sin aviso es peor que el error, porque nadie lo investiga.
+  #
+  # Encontrado en local_portafolio (IntegracionResultadosService), donde además está DOCUMENTADO
+  # como comportamiento deseado — lo cual lo convierte en una discrepancia de criterio a discutir
+  # con el equipo, no en un descuido. La regla lo saca a la superficie para que se discuta.
+  - id: moodle-dml-exception-silenciada
+    languages: [php]
+    severity: WARNING
+    message: >-
+      Excepción de base de datos capturada y descartada devolviendo vacío/cero: el usuario verá
+      «sin datos» cuando en realidad la consulta falló. Registra el error (debugging() o
+      \core\notification) y distingue en la vista «no hay datos» de «no se pudieron obtener».
+    metadata:
+      category: correctness
+      technology: [moodle]
+      confidence: HIGH
+      cwe:
+        - "CWE-390: Detection of Error Condition Without Action"
+      owasp:
+        - "A09:2021 Security Logging and Monitoring Failures"
+    # POR QUÉ `pattern-regex` Y NO UN PATRÓN ESTRUCTURAL, que era lo primero que se intentó.
+    # El frontend de PHP de semgrep NO PARSEA un `catch` como patrón. Comprobado (2026-08-25,
+    # semgrep OSS 1.172.0) con estas cuatro formas, todas contra un fichero que SÍ contiene el
+    # código —`IntegracionResultadosService.php:138` y `:317`—:
+    #     catch (\dml_exception $E) { ... }        -> "Rule parse error"
+    #     catch (dml_exception $E) { ... }         -> "Rule parse error"
+    #     catch (Exception $E) { ... }             -> "Rule parse error"
+    #     try { ... } catch (...) { ... }          -> "Rule parse error"
+    # Y la versión larga `try { ... } catch (\dml_exception $E) { return []; }` PASABA
+    # `semgrep --validate` pero devolvía **0 hallazgos** sobre el fichero que los tiene: válida
+    # para el validador, ciega para el motor. Ese es el peor desenlace posible —una regla que
+    # parece cubrir y no cubre—, así que se cambia por lo que sí se puede verificar.
+    #
+    # Y la regex TAMBIÉN se comprobó, porque la primera versión estaba mal y devolvía 0: llevaba
+    # `[A-Za-z_][A-Za-z0-9_\\]*` codicioso antes del nombre, que se tragaba `dml_exception` y
+    # luego no podía casarlo. Con `[\w\\]*?` perezoso encuentra las 2 ocurrencias reales
+    # (IntegracionResultadosService.php:138 y :317). Las otras 2 apariciones de `dml_exception`
+    # del proyecto, en cli/seed_rap.php, NO casan — y es correcto: su bloque hace otra cosa, no
+    # devuelve vacío. Una regla que hubiera marcado las cuatro habría sido menos precisa, no más.
+    pattern-regex: '(?s)catch\s*\(\s*\\?[\w\\]*?(dml_exception|moodle_exception)\s+\$\w+\s*\)\s*\{\s*return\s*(\[\]|array\(\)|0|null|false)\s*;\s*\}'

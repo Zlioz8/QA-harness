@@ -1,0 +1,80 @@
+# OWASP ZAP Automation Framework — analitica_notificaciones (Reportes ZAJUNA).
+#
+# ALCANCE: escaneo ACTIVO, autorizado por escrito por el responsable de QA contra el despliegue
+# https://zajunavideo5.com/analitica (AMBIENTE=ZAJUNA PRODUCTION en su .env). Queda registrado
+# como autorizado en el informe y en RUN.md. No apuntar esto a otro host sin una nueva ventana.
+#
+# ZAP corre SIN AUTENTICAR. Lo que cubre con precisión: cabeceras de seguridad, TLS, la
+# superficie del login (POST /api/auth/moodle-login), y todo lo que la API expone sin sesión.
+# Lo que NO cubre: autorización entre usuarios. Que la cuenta B no alcance las solicitudes de la
+# cuenta A es la pregunta de la matriz de Playwright, no de aquí — un informe limpio aquí abajo
+# no dice nada sobre eso.
+#
+# DOS PARTICULARIDADES DE ESTE SISTEMA QUE OBLIGAN A ESTA CONFIGURACIÓN:
+#
+# 1. El frontend es UN index.html que llama la API por fetch(): un spider siguiendo enlaces no
+#    descubre casi nada. Por eso la superficie real se importa a mano desde urls.txt.
+#
+# 2. api/main.py monta un catch-all `@app.get("/{path:path}")` que devuelve el SPA con 200 para
+#    CUALQUIER ruta inventada (comprobado: GET /analitica/cualquier-cosa-12345 -> 200 index.html).
+#    Eso significa que ZAP no puede usar "200 vs 404" para decidir si un recurso existe. Es un
+#    hallazgo en sí mismo (rompe la detección de recursos y las reglas que dependen de códigos de
+#    estado), y va al informe; aquí solo condiciona que no confiemos en el crawler para enumerar.
+env:
+  contexts:
+    - name: analitica
+      urls:
+        - "${APP_INTERNAL_URL}/"
+      includePaths:
+        - "${APP_INTERNAL_URL}/.*"
+      excludePaths:
+        # Cerraría nuestra propia sesión — aunque ZAP va sin autenticar, un POST aquí no aporta.
+        - ".*/api/auth/logout.*"
+        # GENERACIÓN Y VISTA PREVIA DE REPORTES: encolan trabajo pesado (RQ worker) contra la BD
+        # de Moodle REAL. Un escaneo activo repitiéndolos es una prueba de carga no acordada
+        # contra producción, no un escaneo de seguridad. Requieren sesión (401 sin token), así que
+        # ZAP no los alcanzaría de todos modos — pero se excluyen explícitamente por si acaso.
+        - ".*/api/reportes/.*/generar.*"
+        - ".*/api/reportes/.*/preview.*"
+  parameters:
+    failOnError: false      # el veredicto lo da `make gate`, no el código de salida de la herramienta
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: spider
+    parameters:
+      context: analitica
+      url: "${APP_INTERNAL_URL}/"
+      maxDuration: 3
+
+  # La superficie real, a mano: la API no está enlazada desde el HTML (fetch), así que el
+  # crawler no la encuentra. urls.txt lleva /api/health, el login, las 4 de /api/reportes por
+  # los 10 códigos reales de api/sql/*.sql, /api/solicitudes, /api/programados, /api/admin/users
+  # (para COMPROBAR que el router admin no está montado — C5) y los estáticos.
+  - type: import
+    parameters:
+      type: url
+      fileName: /zap/wrk/zap/urls.txt
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  - type: activeScan
+    parameters:
+      context: analitica
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 12
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.json
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.html

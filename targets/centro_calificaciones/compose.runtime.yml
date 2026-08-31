@@ -1,0 +1,39 @@
+# Centro de Calificaciones, rung 3 — el laboratorio levanta las apps, efímero, desde el checkout.
+# DOS apps PHP (Apache+mod_php 8.2, ext-mongodb) sirviéndose como hermanas bajo un DocumentRoot,
+# + MongoDB 7 propio. Namespaceado para CONVIVIR (puertos/nombres distintos de los 18 vecinos):
+#   web  -> 127.0.0.1:8097   mongo -> 127.0.0.1:27117
+# Postgres: NO lo levanta el lab. Las apps leen la BD del core (moodle) por un rol de SOLO LECTURA;
+# la BD de integración es propia (calif_integracion). Ver COTEJO_DESPLIEGUE.md.
+services:
+  web:
+    profiles: ["runtime","dast","perf","e2e","prod"]
+    container_name: calif_web
+    build:
+      context: ./targets/centro_calificaciones/runtime
+    entrypoint: ["/entrypoint.sh"]
+    volumes:
+      - ${SRC_PATH}:/src:ro
+      - ./targets/centro_calificaciones/runtime/entrypoint.sh:/entrypoint.sh:ro
+      - ./targets/centro_calificaciones/deps:/deps:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "nginx.zajuna.com:host-gateway"
+    ports:
+      - "127.0.0.1:8097:80"
+    depends_on:
+      mongo:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL","curl -fsS http://localhost/lmsActividad/public/css/unificado.css >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+  mongo:
+    profiles: ["runtime","dast","perf","e2e","prod"]
+    container_name: calif_mongo
+    image: mongo:7
+    ports:
+      - "127.0.0.1:27117:27017"
+    tmpfs:
+      - /data/db

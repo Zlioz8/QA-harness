@@ -1,0 +1,8 @@
+${ZAP_TARGET_URL}/mod/imagecarousel/view.php?id=73985
+${ZAP_TARGET_URL}/mod/imagecarousel/carousel_content.php?cmid=73985
+${ZAP_TARGET_URL}/mod/imagecarousel/manage.php?id=73985
+${ZAP_TARGET_URL}/mod/imagecarousel/edit.php?id=73985
+${ZAP_TARGET_URL}/mod/imagecarousel/adding_image.php?id=73985
+${ZAP_TARGET_URL}/mod/imagecarousel/delete.php?id=73985&imageid=1
+${ZAP_TARGET_URL}/mod/imagecarousel/webp-support.php?id=73985
+${ZAP_TARGET_URL}/pluginfile.php/137927/mod_imagecarousel/images/1/x.png

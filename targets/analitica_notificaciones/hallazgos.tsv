@@ -1,0 +1,188 @@
+# Registro de hallazgos — identidad estable entre rondas.
+# Lo mantiene tools/report.py; responsable y severidad se ajustan A MANO.
+# Un id emitido NO se reasigna nunca.
+id	sub	clave	titulo	severidad	dimension	responsable	esfuerzo	abierto_en	cerrado_en	estado
+H1		sonar|docker:S6470|analitica_notificaciones/Dockerfile	docker:S6470	critical	sonar			1		abierto
+H2		sonar|python:S3776|analitica_notificaciones/api/jobs.py	python:S3776	critical	sonar			1		abierto
+H3		sonar|python:S1192|analitica_notificaciones/api/routers/programados.py	python:S1192	critical	sonar			1		abierto
+H4		sonar|python:S1192|analitica_notificaciones/api/routers/solicitudes.py	python:S1192	critical	sonar			1		abierto
+H5		sonar|python:S3776|analitica_notificaciones/api/scheduler.py	python:S3776	critical	sonar			1		abierto
+H6		sonar|javascript:S3776|analitica_notificaciones/frontend/app.js	javascript:S3776	critical	sonar			1		abierto
+H7		sonar|php:S6600|analitica_notificaciones/reporteszajuna/redirect.php	php:S6600	critical	sonar			1		abierto
+H8		sonar|php:S4790|analitica_notificaciones/reporteszajuna/redirect.php	php:S4790	critical	sonar			1		abierto
+H9	3.2	trivy-fs|CVE-2024-33663|requirements.txt	`python-jose` 3.3.0 (CVE-2024-33663, confusión de algoritmo) firma los JWT de sesión	critical	trivy-fs	Backend	Bajo	1		abierto
+H10		deploy-contract|D3|DEPLOY.md	D3	high	deploy-contract			1		abierto
+H11		semgrep|dockerfile.security.missing-user.missing-user|/src/Dockerfile	dockerfile.security.missing-user.missing-user	high	semgrep			1		abierto
+H12		sonar|python:S125|analitica_notificaciones/api/models.py	python:S125	high	sonar			1		abierto
+H13		sonar|python:S8572|analitica_notificaciones/api/moodle_auth.py	python:S8572	high	sonar			1		abierto
+H14		sonar|python:S8415|analitica_notificaciones/api/routers/admin.py	python:S8415	high	sonar			1		abierto
+H15		sonar|python:S8415|analitica_notificaciones/api/routers/auth.py	python:S8415	high	sonar			1		abierto
+H16		sonar|python:S8415|analitica_notificaciones/api/routers/programados.py	python:S8415	high	sonar			1		abierto
+H17		sonar|python:S8415|analitica_notificaciones/api/routers/reportes.py	python:S8415	high	sonar			1		abierto
+H18		sonar|python:S8572|analitica_notificaciones/api/routers/reportes.py	python:S8572	high	sonar			1		abierto
+H19		sonar|python:S8415|analitica_notificaciones/api/routers/solicitudes.py	python:S8415	high	sonar			1		abierto
+H20		sonar|python:S8572|analitica_notificaciones/api/scheduler.py	python:S8572	high	sonar			1		abierto
+H21		sonar|javascript:S6661|analitica_notificaciones/frontend/app.js	javascript:S6661	high	sonar			1		abierto
+H22		sonar|javascript:S3358|analitica_notificaciones/frontend/app.js	javascript:S3358	high	sonar			1		abierto
+H23		sonar|Web:S6844|analitica_notificaciones/frontend/index.html	Web:S6844	high	sonar			1		abierto
+H24		sonar|Web:S6850|analitica_notificaciones/frontend/index.html	Web:S6850	high	sonar			1		abierto
+H25		sonar|Web:S6853|analitica_notificaciones/frontend/index.html	Web:S6853	high	sonar			1		abierto
+H26		sonar|Web:InputWithoutLabelCheck|analitica_notificaciones/frontend/index.html	Web:InputWithoutLabelCheck	high	sonar			1		abierto
+H27		sonar|css:S7924|analitica_notificaciones/frontend/styles.css	css:S7924	high	sonar			1		abierto
+H28	3.3	sonar|php:S2245|analitica_notificaciones/reporteszajuna/redirect.php	El wstoken de sesión SSO se genera con `md5(uniqid(rand()))` en `redirect.php`: predecible	critical	sonar	Backend	Medio	1		abierto
+H29		trivy-config|DS-0002|Dockerfile	DS-0002	high	trivy-config			1		abierto
+H30		trivy-fs|DS-0002|Dockerfile	DS-0002	high	trivy-fs			1		abierto
+H31	3.4	trivy-fs|CVE-2024-53981|requirements.txt	`python-multipart` 0.0.17 arrastra 4 CVE HIGH (denegación de servicio)	high	trivy-fs	Backend	Bajo	1		abierto
+H32		trivy-fs|CVE-2026-24486|requirements.txt	CVE-2026-24486	high	trivy-fs			1		abierto
+H33		trivy-fs|CVE-2026-42561|requirements.txt	CVE-2026-42561	high	trivy-fs			1		abierto
+H34		trivy-fs|CVE-2026-53539|requirements.txt	CVE-2026-53539	high	trivy-fs			1		abierto
+H35	3.8	deploy-contract|D1|DEPLOY.md	Sin `.env.example` ni integración continua: cada despliegue adivina la configuración	medium	deploy-contract	Líder Técnico	Medio	1		abierto
+H36		deploy-contract|D2|DEPLOY.md	D2	medium	deploy-contract			1		abierto
+H37		qodana|PyTypeHintsInspection|api/auth.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H38		qodana|PyTypeHintsInspection|api/jobs.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H39		qodana|PyTypeHintsInspection|api/moodle_auth.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H40		qodana|PyUnusedImportsInspection|api/reportes/fichas_programas.py	PyUnusedImportsInspection	medium	qodana			1		abierto
+H41		qodana|PyTypeHintsInspection|api/reportes/registry.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H42		qodana|PyTypeHintsInspection|api/routers/admin.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H43		qodana|PyUnusedImportsInspection|api/routers/admin.py	PyUnusedImportsInspection	medium	qodana			1		abierto
+H44		qodana|PyTypeHintsInspection|api/routers/programados.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H45		qodana|PyTypeHintsInspection|api/routers/reportes.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H46		qodana|PyTypeHintsInspection|api/scheduler.py	PyTypeHintsInspection	medium	qodana			1		abierto
+H47		semgrep|python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure|/src/api/moodle_auth.py	python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure	medium	semgrep			1		abierto
+H48		trivy-fs|CVE-2024-33664|requirements.txt	CVE-2024-33664	medium	trivy-fs			1		abierto
+H49		trivy-fs|CVE-2026-40347|requirements.txt	CVE-2026-40347	medium	trivy-fs			1		abierto
+H50		trufflehog|trufflehog.JDBC.unverified|deps.edn	trufflehog.JDBC.unverified	medium	trufflehog			1		abierto
+H51		trufflehog|trufflehog.Postgres.unverified|dev/docker-compose copy.yml	trufflehog.Postgres.unverified	medium	trufflehog			1		abierto
+H52		trufflehog|trufflehog.JDBC.unverified|dev/docker-compose copy.yml	trufflehog.JDBC.unverified	medium	trufflehog			1		abierto
+H53		trufflehog|trufflehog.Metabase.unverified|docs/configuring-metabase/appearance.md	trufflehog.Metabase.unverified	medium	trufflehog			1		abierto
+H54		trufflehog|trufflehog.Postgres.unverified|docs/configuring-metabase/environment-variables.md	trufflehog.Postgres.unverified	medium	trufflehog			1		abierto
+H55		trufflehog|trufflehog.JDBC.unverified|docs/configuring-metabase/environment-variables.md	trufflehog.JDBC.unverified	medium	trufflehog			1		abierto
+H56		trufflehog|trufflehog.MongoDB.unverified|docs/databases/connections/mongodb.md	trufflehog.MongoDB.unverified	medium	trufflehog			1		abierto
+H57		trufflehog|trufflehog.Metabase.unverified|docs/embedding/static-embedding-parameters.md	trufflehog.Metabase.unverified	medium	trufflehog			1		abierto
+H58		trufflehog|trufflehog.Postgres.unverified|docs/installation-and-operation/migrating-from-h2.md	trufflehog.Postgres.unverified	medium	trufflehog			1		abierto
+H59		trufflehog|trufflehog.Postgres.unverified|docs/installation-and-operation/running-metabase-on-azure.md	trufflehog.Postgres.unverified	medium	trufflehog			1		abierto
+H60		trufflehog|trufflehog.Postgres.unverified|docs/installation-and-operation/upgrading-metabase.md	trufflehog.Postgres.unverified	medium	trufflehog			1		abierto
+H61		trufflehog|trufflehog.MongoDB.unverified|e2e/test/scenarios/admin/databases.cy.spec.js	trufflehog.MongoDB.unverified	medium	trufflehog			1		abierto
+H62		trufflehog|trufflehog.PrivateKey.unverified|e2e/test/scenarios/maildev-keys/key.pem	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H63		trufflehog|trufflehog.PrivateKey.unverified|modules/drivers/clickhouse/.docker/clickhouse/single_node_tls/certificates/ca.key	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H64		trufflehog|trufflehog.PrivateKey.unverified|modules/drivers/clickhouse/.docker/clickhouse/single_node_tls/certificates/client.key	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H65		trufflehog|trufflehog.PrivateKey.unverified|modules/drivers/clickhouse/.docker/clickhouse/single_node_tls/certificates/server.key	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H66		trufflehog|trufflehog.MongoDB.unverified|modules/drivers/mongo/test/metabase/driver/mongo_test.clj	trufflehog.MongoDB.unverified	medium	trufflehog			1		abierto
+H67		trufflehog|trufflehog.Postgres.unverified|src/metabase/cmd/resources/other-env-vars.md	trufflehog.Postgres.unverified	medium	trufflehog			1		abierto
+H68		trufflehog|trufflehog.JDBC.unverified|src/metabase/cmd/resources/other-env-vars.md	trufflehog.JDBC.unverified	medium	trufflehog			1		abierto
+H69		trufflehog|trufflehog.JDBC.unverified|test/metabase/app_db/env_test.clj	trufflehog.JDBC.unverified	medium	trufflehog			1		abierto
+H70		trufflehog|trufflehog.Postgres.unverified|test/metabase/app_db/env_test.clj	trufflehog.Postgres.unverified	medium	trufflehog			1		abierto
+H71		trufflehog|trufflehog.JWT.unverified|test/metabase/embedding/jwt_test.clj	trufflehog.JWT.unverified	medium	trufflehog			1		abierto
+H72		trufflehog|trufflehog.TatumIO.unverified|test/metabase/test/data/dataset_definitions/test-data.edn	trufflehog.TatumIO.unverified	medium	trufflehog			1		abierto
+H73		trufflehog|trufflehog.SQLServer.unverified|test/metabase/warehouses/api_test.clj	trufflehog.SQLServer.unverified	medium	trufflehog			1		abierto
+H74		trufflehog|trufflehog.PrivateKey.unverified|test_resources/ssh/ssh_test	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H75		trufflehog|trufflehog.PrivateKey.unverified|test_resources/ssh/ssh_test_invalid	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H76		trufflehog|trufflehog.PrivateKey.unverified|test_resources/ssl/ca-key.pem	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H77		trufflehog|trufflehog.PrivateKey.unverified|test_resources/ssl/mongo/metabase.key	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H78		trufflehog|trufflehog.PrivateKey.unverified|test_resources/ssl/server.key	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H79		trufflehog|trufflehog.PrivateKey.unverified|test_resources/sso/idp.private.key	trufflehog.PrivateKey.unverified	medium	trufflehog			1		abierto
+H80	3.7	zap|zap-10038|https://zajunavideo5.com/analitica/	Cabeceras de seguridad ausentes: CSP, X-Frame-Options, HSTS, X-Content-Type-Options	medium	zap	DevOps/Infra	Bajo	1		abierto
+H81		zap|zap-10020|https://zajunavideo5.com/analitica/	zap-10020	medium	zap			1		abierto
+H82		zap|zap-10038|https://zajunavideo5.com/analitica/api/auth/logout	zap-10038	medium	zap			1		abierto
+H83		zap|zap-10020|https://zajunavideo5.com/analitica/api/auth/logout	zap-10020	medium	zap			1		abierto
+H84		zap|zap-10038|https://zajunavideo5.com/analitica/api/auth/moodle-login	zap-10038	medium	zap			1		abierto
+H85		zap|zap-10020|https://zajunavideo5.com/analitica/api/auth/moodle-login	zap-10020	medium	zap			1		abierto
+H86		zap|zap-10038|https://zajunavideo5.com/analitica/api/docs	zap-10038	medium	zap			1		abierto
+H87		zap|zap-10020|https://zajunavideo5.com/analitica/api/docs	zap-10020	medium	zap			1		abierto
+H88		zap|zap-10038|https://zajunavideo5.com/analitica/api/openapi.json	zap-10038	medium	zap			1		abierto
+H89		zap|zap-10020|https://zajunavideo5.com/analitica/api/openapi.json	zap-10020	medium	zap			1		abierto
+H90		qodana|PyInconsistentReturnsInspection|api/jobs.py	PyInconsistentReturnsInspection	low	qodana			1		abierto
+H91		qodana|PyShadowingNamesInspection|api/jobs.py	PyShadowingNamesInspection	low	qodana			1		abierto
+H92		qodana|PyShadowingNamesInspection|api/main.py	PyShadowingNamesInspection	low	qodana			1		abierto
+H93		qodana|PyUnusedParameterInspection|api/main.py	PyUnusedParameterInspection	low	qodana			1		abierto
+H94		qodana|PyClassHasNoInitInspection|api/reportes/registry.py	PyClassHasNoInitInspection	low	qodana			1		abierto
+H95		qodana|PyUnusedParameterInspection|api/routers/auth.py	PyUnusedParameterInspection	low	qodana			1		abierto
+H96		qodana|PyUnusedParameterInspection|api/routers/reportes.py	PyUnusedParameterInspection	low	qodana			1		abierto
+H97		qodana|PyComparisonWithNoneInspection|api/scheduler.py	PyComparisonWithNoneInspection	low	qodana			1		abierto
+H98		sonar|docker:S6471|analitica_notificaciones/Dockerfile	docker:S6471	low	sonar			1		abierto
+H99		sonar|python:S8410|analitica_notificaciones/api/routers/reportes.py	python:S8410	low	sonar			1		abierto
+H100		sonar|python:S7504|analitica_notificaciones/api/routers/solicitudes.py	python:S7504	low	sonar			1		abierto
+H101		sonar|javascript:S2486|analitica_notificaciones/frontend/app.js	javascript:S2486	low	sonar			1		abierto
+H102		sonar|javascript:S1135|analitica_notificaciones/frontend/app.js	javascript:S1135	low	sonar			1		abierto
+H103		sonar|javascript:S7745|analitica_notificaciones/frontend/app.js	javascript:S7745	low	sonar			1		abierto
+H104		sonar|javascript:S7776|analitica_notificaciones/frontend/app.js	javascript:S7776	low	sonar			1		abierto
+H105		sonar|javascript:S6582|analitica_notificaciones/frontend/app.js	javascript:S6582	low	sonar			1		abierto
+H106		sonar|javascript:S6594|analitica_notificaciones/frontend/app.js	javascript:S6594	low	sonar			1		abierto
+H107		sonar|javascript:S7781|analitica_notificaciones/frontend/app.js	javascript:S7781	low	sonar			1		abierto
+H108		sonar|javascript:S7773|analitica_notificaciones/frontend/app.js	javascript:S7773	low	sonar			1		abierto
+H109		sonar|php:S101|analitica_notificaciones/reporteszajuna/classes/observer.php	php:S101	low	sonar			1		abierto
+H110		sonar|php:S100|analitica_notificaciones/reporteszajuna/classes/observer.php	php:S100	low	sonar			1		abierto
+H111		sonar|php:S100|analitica_notificaciones/reporteszajuna/db/upgrade.php	php:S100	low	sonar			1		abierto
+H112		sonar|php:S100|analitica_notificaciones/reporteszajuna/lib.php	php:S100	low	sonar			1		abierto
+H113		sonar|php:S1793|analitica_notificaciones/reporteszajuna/redirect.php	php:S1793	low	sonar			1		abierto
+H114		trivy-config|DS-0026|Dockerfile	DS-0026	low	trivy-config			1		abierto
+H115		trivy-fs|DS-0026|Dockerfile	DS-0026	low	trivy-fs			1		abierto
+H116		trivy-fs|CVE-2026-53537|requirements.txt	CVE-2026-53537	low	trivy-fs			1		abierto
+H117		trivy-fs|CVE-2026-53538|requirements.txt	CVE-2026-53538	low	trivy-fs			1		abierto
+H118		trivy-fs|CVE-2026-53540|requirements.txt	CVE-2026-53540	low	trivy-fs			1		abierto
+H119		zap|zap-10096|https://zajunavideo5.com/analitica/	zap-10096	low	zap			1		abierto
+H120		zap|zap-10021|https://zajunavideo5.com/analitica/	zap-10021	low	zap			1		abierto
+H121		zap|zap-10109|https://zajunavideo5.com/analitica/	zap-10109	low	zap			1		abierto
+H122		zap|zap-10015|https://zajunavideo5.com/analitica/	zap-10015	low	zap			1		abierto
+H123		zap|zap-10096|https://zajunavideo5.com/analitica/api/auth/logout	zap-10096	low	zap			1		abierto
+H124		zap|zap-10109|https://zajunavideo5.com/analitica/api/auth/logout	zap-10109	low	zap			1		abierto
+H125		zap|zap-10036|https://zajunavideo5.com/analitica/api/auth/me	zap-10036	low	zap			1		abierto
+H126		zap|zap-10035|https://zajunavideo5.com/analitica/api/auth/me	zap-10035	low	zap			1		abierto
+H127		zap|zap-10036|https://zajunavideo5.com/analitica/api/auth/moodle-autologin	zap-10036	low	zap			1		abierto
+H128		zap|zap-10035|https://zajunavideo5.com/analitica/api/auth/moodle-autologin	zap-10035	low	zap			1		abierto
+H129		zap|zap-10096|https://zajunavideo5.com/analitica/api/auth/moodle-login	zap-10096	low	zap			1		abierto
+H130		zap|zap-10021|https://zajunavideo5.com/analitica/api/auth/moodle-login	zap-10021	low	zap			1		abierto
+H131		zap|zap-10109|https://zajunavideo5.com/analitica/api/auth/moodle-login	zap-10109	low	zap			1		abierto
+H132		zap|zap-10015|https://zajunavideo5.com/analitica/api/auth/moodle-login	zap-10015	low	zap			1		abierto
+H133		zap|zap-10096|https://zajunavideo5.com/analitica/api/docs	zap-10096	low	zap			1		abierto
+H134		zap|zap-10109|https://zajunavideo5.com/analitica/api/docs	zap-10109	low	zap			1		abierto
+H135		zap|zap-10015|https://zajunavideo5.com/analitica/api/docs	zap-10015	low	zap			1		abierto
+H136		zap|zap-10036|https://zajunavideo5.com/analitica/api/health	zap-10036	low	zap			1		abierto
+H137		zap|zap-10035|https://zajunavideo5.com/analitica/api/health	zap-10035	low	zap			1		abierto
+H138		zap|zap-10021|https://zajunavideo5.com/analitica/api/health	zap-10021	low	zap			1		abierto
+H139		zap|zap-10015|https://zajunavideo5.com/analitica/api/health	zap-10015	low	zap			1		abierto
+H140		zap|zap-10104|https://zajunavideo5.com/analitica/api/health	zap-10104	low	zap			1		abierto
+H141		zap|zap-10096|https://zajunavideo5.com/analitica/api/openapi.json	zap-10096	low	zap			1		abierto
+H142		zap|zap-10109|https://zajunavideo5.com/analitica/api/openapi.json	zap-10109	low	zap			1		abierto
+H143		zap|zap-10015|https://zajunavideo5.com/analitica/api/openapi.json	zap-10015	low	zap			1		abierto
+H144		zap|zap-10027|https://zajunavideo5.com/analitica/app.js	zap-10027	low	zap			1		abierto
+H145		zap|zap-10027|https://zajunavideo5.com/analitica/app.js?v=1786024466	zap-10027	low	zap			1		abierto
+H146		zap|zap-10036|https://zajunavideo5.com/analitica/logo.svg	zap-10036	low	zap			1		abierto
+H147		zap|zap-10035|https://zajunavideo5.com/analitica/logo.svg	zap-10035	low	zap			1		abierto
+H148		zap|zap-10021|https://zajunavideo5.com/analitica/logo.svg	zap-10021	low	zap			1		abierto
+H149		zap|zap-10036|https://zajunavideo5.com/analitica/styles.css?v=1786024466	zap-10036	low	zap			1		abierto
+H150		zap|zap-10035|https://zajunavideo5.com/analitica/styles.css?v=1786024466	zap-10035	low	zap			1		abierto
+H151		zap|zap-10021|https://zajunavideo5.com/analitica/styles.css?v=1786024466	zap-10021	low	zap			1		abierto
+H152		gitleaks|reportes-secret-key|+	reportes-secret-key	unranked	gitleaks			1		abierto
+H153	3.1	gitleaks|reportes-secret-key|.env	`.env` versionado con secretos reales: clave HS256 del JWT y contraseñas de BD	critical	gitleaks	Backend + DevOps/Infra	Bajo	1		abierto
+H154		gitleaks|analitica-db-password|.env	analitica-db-password	unranked	gitleaks			1		abierto
+H155		gitleaks|reportes-secret-key|docs/MANUAL_DESPLIEGUE.md	reportes-secret-key	unranked	gitleaks			1		abierto
+H156		gitleaks|generic-api-key|docs/configuring-metabase/config-template.md	generic-api-key	unranked	gitleaks			1		abierto
+H157		gitleaks|generic-api-key|docs/databases/encrypting-details-at-rest.md	generic-api-key	unranked	gitleaks			1		abierto
+H158		gitleaks|curl-auth-header|docs/installation-and-operation/serialization.md	curl-auth-header	unranked	gitleaks			1		abierto
+H159		gitleaks|curl-auth-header|docs/people-and-groups/api-keys.md	curl-auth-header	unranked	gitleaks			1		abierto
+H160		gitleaks|curl-auth-header|docs/permissions/database-routing.md	curl-auth-header	unranked	gitleaks			1		abierto
+H161		gitleaks|private-key|e2e/test/scenarios/maildev-keys/key.pem	private-key	unranked	gitleaks			1		abierto
+H162		gitleaks|generic-api-key|enterprise/frontend/src/embedding-sdk/cli/constants/env.ts	generic-api-key	unranked	gitleaks			1		abierto
+H163		gitleaks|jwt|frontend/src/metabase/public/containers/PublicOrEmbeddedDashboard/PublicOrEmbeddedDashboardPage/tests/setup.tsx	jwt	unranked	gitleaks			1		abierto
+H164		gitleaks|generic-api-key|frontend/src/metabase/setup/constants.ts	generic-api-key	unranked	gitleaks			1		abierto
+H165		gitleaks|private-key|modules/drivers/clickhouse/.docker/clickhouse/single_node_tls/certificates/ca.key	private-key	unranked	gitleaks			1		abierto
+H166		gitleaks|private-key|modules/drivers/clickhouse/.docker/clickhouse/single_node_tls/certificates/client.key	private-key	unranked	gitleaks			1		abierto
+H167		gitleaks|private-key|modules/drivers/clickhouse/.docker/clickhouse/single_node_tls/certificates/server.key	private-key	unranked	gitleaks			1		abierto
+H168		gitleaks|analitica-inline-dsn|src/metabase/app_db/data_source.clj	analitica-inline-dsn	unranked	gitleaks			1		abierto
+H169		gitleaks|generic-api-key|src/metabase/cmd/resources/config-template.yaml	generic-api-key	unranked	gitleaks			1		abierto
+H170		gitleaks|jwt|test/metabase/embedding/jwt_test.clj	jwt	unranked	gitleaks			1		abierto
+H171		gitleaks|private-key|test_resources/ssh/ssh_test	private-key	unranked	gitleaks			1		abierto
+H172		gitleaks|private-key|test_resources/ssh/ssh_test_invalid	private-key	unranked	gitleaks			1		abierto
+H173		gitleaks|private-key|test_resources/ssh/ssh_test_passphrase	private-key	unranked	gitleaks			1		abierto
+H174		gitleaks|private-key|test_resources/ssl/ca-key.pem	private-key	unranked	gitleaks			1		abierto
+H175		gitleaks|private-key|test_resources/ssl/mongo/metabase.key	private-key	unranked	gitleaks			1		abierto
+H176		gitleaks|private-key|test_resources/ssl/server.key	private-key	unranked	gitleaks			1		abierto
+H177		gitleaks|private-key|test_resources/sso/idp.private.key	private-key	unranked	gitleaks			1		abierto
+N1	3.5		El router `admin` nunca se monta y el catch-all devuelve 200 a cualquier ruta	high	codigo	Backend	Medio	1		abierto
+N2	3.6		El wstoken/JWT de sesión viaja en la URL de `moodle-autologin`	medium	codigo	Backend	Medio	1		abierto
+N3	3.9		Revalidación de sesión Moodle en fail-open: si la BD falla, la sesión sobrevive	medium	codigo	Backend	Bajo	1		abierto
+N4	3.10		`MOODLE_DB_USER=postgres` (superusuario) y `MOODLE_DB_NAME=zajunadb` contra la propia doc	medium	codigo	DevOps/Infra + Backend	Bajo	1		abierto
+N5	3.11		`descargar-email` comprueba estado antes que propiedad: fuga de existencia (409 vs 404)	low	codigo	Backend	Bajo	1		abierto
+N6	3.12		La vista previa del reporte más pesado devuelve 502 en producción (no el 503 documentado)	medium	mcp-journey	Backend + DevOps/Infra	Medio	1		abierto
+N7	3.13		Los reportes dependen del esquema `midb` y de tablas custom no documentadas en DEPLOY.md	high	mcp-journey	Backend + DevOps/Infra	Medio	1		abierto

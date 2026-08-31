@@ -1,0 +1,60 @@
+# Spectral ruleset for `make api-lint` — the audit's view of an OpenAPI document.
+#
+# Starts from Spectral's own oas ruleset (structural validity: is this a legal OpenAPI file)
+# and adds the questions an audit asks, which are about what the description LEAVES OUT.
+# An undocumented parameter is a parameter nobody threat-modelled; an operation with no declared
+# security is either public on purpose or public by accident, and the document is where that
+# distinction should have been written down.
+extends: ["spectral:oas"]
+
+rules:
+  # Spectral's defaults are aimed at documentation quality. These are not.
+  operation-tag-defined: off
+  info-contact: off
+  info-description: warn
+
+  seclab-operation-security-defined:
+    description: >-
+      Operation declares no security. Either it is genuinely public — say so with `security: []`
+      and the reviewer moves on — or authentication was assumed and never described, which is
+      how an endpoint ends up reachable by anyone.
+    given: "$.paths[*][get,put,post,delete,patch]"
+    severity: error
+    then:
+      field: security
+      function: truthy
+
+  seclab-request-body-schema:
+    description: >-
+      Request body without a schema. Nothing can then check what the endpoint accepts — not this
+      lab, not a client, not the next reader.
+    given: "$.paths[*][put,post,patch].requestBody.content[*]"
+    severity: error
+    then:
+      field: schema
+      function: truthy
+
+  seclab-error-responses-documented:
+    description: >-
+      No 4xx documented. An API that describes only its happy path tells you nothing about what
+      it does with bad input, which is exactly what an attacker sends.
+    given: "$.paths[*][get,put,post,delete,patch].responses"
+    severity: warn
+    then:
+      function: schema
+      functionOptions:
+        schema:
+          type: object
+          patternProperties:
+            "^4[0-9][0-9]$": {}
+          minProperties: 1
+          errorMessage: at least one 4xx response should be described
+
+  seclab-no-http-server:
+    description: Server URL over plaintext http://.
+    given: "$.servers[*].url"
+    severity: error
+    then:
+      function: pattern
+      functionOptions:
+        notMatch: "^http://(?!localhost|127\\.0\\.0\\.1)"

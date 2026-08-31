@@ -1,0 +1,24 @@
+# Qodana — perfil para reportes_de_cursos (ZAJUNA Early Alert).
+#
+# UN PROYECTO POLÍGLOTA, UNA IMAGEN. El censo de `make detect` dice php=220, ts=345, go=171. Las
+# imágenes de Qodana cubren UN lenguaje cada una, y las de PHP y JS/TS son de pago (exigen
+# QODANA_TOKEN); sin token la dimensión se reporta NO DISPONIBLE, nunca como aprobada. Lo que sí
+# cubre a los tres es SonarQube + semgrep, y así debe constar en el informe.
+#
+# QODANA_SUBDIR del perfil elige sobre qué sub-árbol se inspecciona cuando haya imagen aplicable.
+version: "1.0"
+profile:
+  name: qodana.recommended
+exclude:
+  - name: All
+    paths:
+      # Terceros y artefactos generados: auditarlos sería auditar a otro.
+      - vendor
+      - node_modules
+      - dist
+      # El bundle de widgets se COMPILA desde vue-app/src (vite.config.js, entorno `widgets`,
+      # outDir ../plugin/js). Inspeccionarlo duplica cada hallazgo de su fuente, minificado.
+      - plugin/js
+      - plugin/amd/build
+      # Documentación y formatos ofimáticos del sistema de calidad.
+      - docs

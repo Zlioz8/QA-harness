@@ -1,0 +1,144 @@
+# OWASP ZAP Automation Framework — local_portafolio (portafolio_del_aprendiz @ feature/v2 9674bda).
+#
+# ALCANCE Y AUTORIZACIÓN. Escaneo contra el despliegue LOCAL sobre el core de la máquina
+# (nginx.zajuna.com, plugin en /zajuna/local/portafolio/), autorizado por el responsable de QA
+# (2026-08-25). NO se apunta a zajunavideo.com: ese servidor no es nuestro y un escaneo activo
+# contra él no está autorizado. El destino lo fija APP_INTERNAL_URL; la corrida queda fechada en
+# RUN.md.
+#
+# ZAP CORRE SIN AUTENTICAR, y para este plugin eso define lo que puede y no puede medir:
+#
+#   · TODA página del plugin llama a local_portafolio_require_login() como primera instrucción, así
+#     que sin sesión responden 303 -> /zajuna/login/index.php. Comprobar que redirigen —y no que
+#     sirven contenido, ni que sueltan un 500 con traza— ES la medida de la superficie sin sesión.
+#   · Lo que ZAP NO puede responder aquí es si un aprendiz alcanza el portafolio de OTRO: eso es
+#     control de acceso ENTRE usuarios, y se probó en el recorrido de navegador (matriz autoritativa
+#     en zajunavideo.com + no autoritativa en local). ZAP mide la superficie, no la autorización.
+#
+# CUATRO PARTICULARIDADES QUE OBLIGAN A ESTA CONFIGURACIÓN:
+#
+# 1. SIN AJAX SPIDER. Estas páginas se renderizan en servidor (DEPLOY.md §12): no hay SPA que un
+#    crawler de JavaScript deba ejecutar. El AJAX spider reventó la memoria en #6 (L-R5-e) sin
+#    descubrir nada nuevo. Solo spider tradicional, y acotado a los estáticos del plugin.
+#
+# 2. EL `/` DE ESTE ORIGEN NO ES LA APLICACIÓN. En esta máquina `/` sirve un portal/CMS y Moodle
+#    vive bajo `/zajuna`. Ese portal devuelve **200 con HTML para cualquier ruta inventada**
+#    (medido 2026-08-25: `GET /ruta-inventada` -> 200, cuerpo del portal). Si se deja a ZAP suelto
+#    por `/`, escanea el CMS de otro equipo Y no puede usar «200 vs 404» para saber si algo existe.
+#    Por eso el contexto se acota al prefijo del plugin.
+#
+# 3. EL CORE ES COMPARTIDO por #1/#2/#3/#6. El activeScan se acota con includePaths SOLO al
+#    directorio del plugin: no se escanea /zajuna/login, ni /encuestados, ni /zea-api. Escanear
+#    activamente el login de un core que usan cuatro proyectos sería un incidente para los vecinos.
+#
+# 4. login/index.php SE EXCLUYE DEL ESCANEO ACTIVO. Es el login del core COMPARTIDO. Un escaneo
+#    activo con cargas útiles contra él puede disparar el limitador de intentos de Moodle y dejar
+#    fuera a los otros proyectos (y, si algún día se apuntara al servidor real, a instructores
+#    reales). Queda en el contexto para el análisis PASIVO (cabeceras, cookies, TLS).
+
+env:
+  contexts:
+    - name: portafolio
+      urls:
+        - "${APP_INTERNAL_URL}/zajuna/local/portafolio/"
+      includePaths:
+        - "${APP_INTERNAL_URL}/zajuna/local/portafolio/.*"
+      excludePaths:
+        # El login del core compartido: ver particularidad 4.
+        - ".*/login/.*"
+        # logout con sesskey: seguirlo no aporta y ensucia.
+        - ".*/login/logout\\.php.*"
+  parameters:
+    failOnError: false      # el veredicto lo da `make gate`, no el código de salida de la herramienta
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  # La superficie real, declarada a mano. Son las 16 páginas que el propio DEPLOY.md §13 enumera
+  # como puntos de entrada HTTP del plugin, más los estáticos que nginx sirve directamente. El
+  # spider no las descubre todas (varias solo se alcanzan con courseid), así que se siembran.
+  #
+  # SIN SESIÓN, las .php responden 303 a login. Se piden igual: el 303 —y no un 200 con datos ni un
+  # 500— es la evidencia de que require_login() protege cada punto de entrada. Los estáticos
+  # (css/js) SÍ responden 200 porque nginx los sirve sin pasar por PHP.
+  - type: requestor
+    parameters:
+      user: ""
+    requests:
+      # --- estáticos: 200 directo de nginx (superficie que NO exige sesión) ----------------
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/css/styles.css"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/javascript/activity-grades.js"
+        method: GET
+      # --- los 16 puntos de entrada (DEPLOY.md §13): deben responder 303 sin sesión ---------
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/index.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/cursos.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/view.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/actividades.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/pendientes.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/resultados.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/participantes.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/evidencias.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/logros.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/quiz.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/foros.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/wiki.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/scorm.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/blogs.php?courseid=23535"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/otros.php?courseid=23535"
+        method: GET
+      # voice.php exige `id` de una grabación concreta: sin un id real da un 404 del guion, no del
+      # plugin. Se pide solo con courseid para ver cómo responde a un parámetro incompleto.
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/voice.php?courseid=23535"
+        method: GET
+      # --- inyección de parámetro: userid no numérico (el active scan hará lo suyo, esto siembra) -
+      - url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/view.php?courseid=23535&userid=1"
+        method: GET
+
+  # Spider tradicional acotado: sirve para estáticos olvidados (mapas de fuentes, ficheros de
+  # configuración horneados), NO para descubrir las páginas —que ya están sembradas arriba.
+  - type: spider
+    parameters:
+      context: portafolio
+      url: "${APP_INTERNAL_URL}/zajuna/local/portafolio/"
+      maxDuration: 3
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  # Escaneo activo: inyección en los parámetros (courseid, userid, search, page) de las páginas del
+  # plugin. Acotado por el contexto (solo /local/portafolio/) y con tope de tiempo para no castigar
+  # el core compartido. Sin sesión, prueba la robustez de los puntos de entrada ANTES del gate de
+  # login: que un parámetro malicioso no produzca un 500 con traza en vez del 303 esperado.
+  - type: activeScan
+    parameters:
+      context: portafolio
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 10
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.json
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.html

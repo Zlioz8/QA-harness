@@ -1,0 +1,25 @@
+# Qodana (JetBrains) — inspecciones para analitica_notificaciones.
+#
+# LÍMITE DECLARADO, y hay que decirlo en el informe: este es un proyecto POLÍGLOTA
+# (py + php + js) y Qodana inspecciona UN lenguaje por imagen. Aquí resuelve a
+# jetbrains/qodana-python-community (LANGS empieza por py), así que Qodana solo mira el
+# backend FastAPI en api/ y worker_start.py. El plugin PHP de reporteszajuna/ y el frontend
+# js quedan cubiertos por SonarQube y semgrep, no por Qodana. No es una laguna silenciosa:
+# se afirma aquí y se repite en la cobertura del informe.
+version: "1.0"
+profile:
+  name: qodana.recommended
+exclude:
+  - name: All
+    paths:
+      # Bytecode versionado (27 .pyc): no es fuente, y su presencia en el repo es en sí un
+      # hallazgo de calidad, no algo que Qodana deba inspeccionar como código.
+      - __pycache__
+      - .venv
+      # Copias de trabajo de las consultas y las pruebas sin filtros: SQL, no Python; Qodana
+      # python no las lee y solo añadirían ruido de parseo.
+      - api/sql/copias
+      - pruebas_sql
+      # El plugin PHP y el frontend: fuera del alcance de la imagen python (los ve Sonar/semgrep).
+      - reporteszajuna
+      - frontend

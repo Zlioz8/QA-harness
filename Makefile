@@ -37,9 +37,9 @@ guard:
 	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build \
 	          $(REPORTS)/api $(REPORTS)/mobile $(REPORTS)/device
 
-.PHONY: budget help list new siguiente guiones detect ingest-deploy doctor guard require-live require-auth clone up down purge status gate dashboard informe run-manifest doc-check ui ui-stop ui-logs \
+.PHONY: budget help list new siguiente brief guiones detect ingest-deploy doctor guard require-live require-auth clone up down purge status gate riesgos dashboard informe run-manifest doc-check ui ui-stop ui-logs \
         sonar qodana semgrep secrets deps config-scan image-scan sbom mobile-scan static \
-        build dast perf perf-jmeter e2e device-e2e live all api-lint api-fuzz
+        build dast perf perf-jmeter e2e device-e2e live all api-lint api-fuzz mcp-journey require-mcp
 
 help:             ##[admin] show this list, grouped by what each goal needs
 	@echo ""
@@ -66,6 +66,13 @@ siguiente:        ##[admin] ¿qué toca hacer AHORA con este proyecto? — empie
 	@# procedimiento escrito hay que acordarse de leerlo entero, y saltarse un paso no da error:
 	@# da un informe que parece completo. Ver la cabecera de tools/siguiente.py.
 	@LAB_DIR="$(CURDIR)" tools/siguiente.py "$(TARGET)" $(if $(TODO),--todo,)
+
+brief:            ##[admin] el estado de este proyecto en UNA pantalla — lo que ya se sabe
+	@# `siguiente` dice qué toca AHORA; esto dice qué se sabe YA: perfil resuelto, repositorios
+	@# descubiertos, qué dimensión tiene evidencia y de cuándo, hallazgos por severidad y el
+	@# CONTEXTO.md escrito a mano. Existe para no reconstruir eso releyendo el perfil entero, el
+	@# informe y la bitácora en cada sesión. Ver la cabecera de tools/brief.py.
+	@LAB_DIR="$(CURDIR)" tools/brief.py "$(TARGET)"
 
 guiones:          ##[admin] ¿está cada herramienta aplicada a ESTE proyecto, o corre con el ejemplo?
 	@LAB_DIR="$(CURDIR)" tools/guion-check.py "$(TARGET)"
@@ -122,9 +129,15 @@ sonar: guard      ##[code] SonarQube server + scanner
 	@# que "corrió" sin dejar análisis. tools/sonar-token.sh acuña uno con las credenciales admin
 	@# (genérico, idempotente); si el target ya declara SONAR_TOKEN, lo respeta. El -e lo inyecta
 	@# en el scanner y el export sin que tenga que vivir en target.env.
+	@# SONAR ERA LA ÚLTIMA DIMENSIÓN DE CÓDIGO CIEGA AL MULTI-REPO: L-R3-01 convirtió a todas las
+	@# demás pasándolas por tools/run-dimension.sh, que resuelve el árbol con tools/lib-repos.sh,
+	@# y Sonar no pasa por ahí —necesita servidor, token y export— así que seguía montando
+	@# ${SRC_PATH} ENTERO. En portafolio_del_aprendiz eso fue analizar 285 MB de caché de Qodana,
+	@# reventar por OutOfMemory y declarar «0 issues». El porqué completo, en tools/sonar-src.sh.
 	@tok=$$(tools/sonar-token.sh "$(TARGET)"); \
 	test -n "$$tok" || { echo "sonar: sin token, no se ejecuta el scanner"; exit 1; }; \
-	$(DC) --profile static run --rm -e SONAR_TOKEN="$$tok" sonar-scanner; \
+	src=$$(tools/sonar-src.sh "$(TARGET)"); \
+	SRC_PATH="$$src" $(DC) --profile static run --rm -e SONAR_TOKEN="$$tok" sonar-scanner; \
 	$(DC) --profile static run --rm -e SONAR_TOKEN="$$tok" sonar-export
 	@# Without this the analysis exists only inside the server: absent from the gate, from
 	@# RUN.md and from the report. A dimension that ran and left no artifact is indistinguishable
@@ -253,6 +266,15 @@ device-e2e: guard  ##[live] the app on a real device, journey by journey (adb, h
 	@# idle, logout, re-login rate limits, cleared data. Needs a TTY: it is conducted, not run.
 	@tools/device-e2e.sh "$(TARGET)"
 
+mcp-journey: guard require-live ##[live] flujos de usuario en navegador, conducidos con el servidor MCP
+	@# La navegación REAL por la interfaz (SSO por el plugin, listar, vista previa, generar,
+	@# descargar, programar) con el servidor MCP del navegador de esta máquina, contrastando los
+	@# hallazgos contra lo que pasa en vivo. CONDUCIDA, no automatizable desde make: ver el script.
+	@tools/mcp-journey.sh "$(TARGET)"
+
+require-mcp: guard
+	@tools/require-mcp.sh "$(TARGET)"
+
 e2e: guard require-live require-auth  ##[live] Playwright functional / authz flows
 	@# require-auth es nuevo y sustituye a la SIEMBRA. El laboratorio creaba las dos cuentas antes
 	@# de auditar (seed-users.sh + fixture SQL, 407 lineas, ya eliminadas): una matriz de
@@ -266,6 +288,10 @@ budget: guard require-live     ##[live] presupuesto del hilo principal del naveg
 	$(DC) --profile e2e run --rm playwright sh -c "mkdir -p /run && cp -r /e2e/. /run/ && mkdir -p /run/lib && cp -r /seclab-lib/. /run/lib/ && cd /run && npm init -y >/dev/null 2>&1 && npm i -D @playwright/test@1.49.0 >/dev/null 2>&1 && npx playwright test lib/specs/main-thread-budget.spec.ts --reporter=line"
 
 live: dast perf e2e  ##[live] every dimension that needs the application answering
+	@# Los flujos de navegador (MCP) forman parte del recorrido live y se CONTEMPLAN aquí: si no se
+	@# recorrieron, se avisa para que su ausencia no se lea como «sin hallazgos». No bloquea el
+	@# resto (es conducida), pero queda dicho. Declarable NO APLICA en el perfil.
+	@tools/require-mcp.sh "$(TARGET)" || true
 
 all: static live  ##[live] full pipeline (bring the application up first)
 
@@ -281,6 +307,14 @@ run-manifest: guard ##[admin] write reports/$(TARGET)/RUN.md (commit, digests, e
 
 gate: guard       ##[admin] exit != 0 when the thresholds in target.env are breached
 	@tools/gate.sh "$(TARGET)"
+
+riesgos: guard    ##[admin] ¿cada hallazgo confirmado tiene su documento de fundamentación (OWASP/MITRE/STRIDE/CVSS/ISO 27001)?
+	@# Un hallazgo confirmado sin su documento de riesgo es una severidad sin prueba ni marco.
+	@# El documento vive en targets/<t>/riesgos/<ID>.md: dónde vive el riesgo, por qué medios es
+	@# ejecutable (con la evidencia ya recogida), y su anclaje a marcos reconocidos — trazabilidad
+	@# probatoria para el equipo dev y para una futura certificación ISO/IEC 27001.
+	@# `make riesgos ANDAMIAR=1` crea los esqueletos que falten.
+	@LAB_DIR="$(CURDIR)" tools/riesgos.py "$(TARGET)" $(if $(ANDAMIAR),--andamiar,)
 
 informe: guard    ##[admin] genera INFORME_TECNICO_VERIFICACION_R<n>_<PROYECTO>.md, el entregable al equipo
 	@# Sale completo en todo lo verificable (cobertura, conteos, IDs estables entre rondas, deuda

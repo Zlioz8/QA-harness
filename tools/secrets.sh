@@ -29,6 +29,9 @@ REPORTS="reports/$TARGET"
 # Y el mismo desacuerdo en compose: el Makefile pasa los dos --env-file y este script solo uno,
 # de modo que las herramientas y el contenedor leían perfiles distintos del mismo target.
 . "$(dirname "$0")/lib-env.sh"
+# Y el único descubridor de repositorios. Esta regla vivía aquí, copiada a mano en otros tres
+# scripts; ahora vive en un sitio. Ver la cabecera de tools/lib-repos.sh.
+. "$(dirname "$0")/lib-repos.sh"
 ENVLOCAL=""
 [ -f "$ENVFILE.local" ] && ENVLOCAL="--env-file $ENVFILE.local"
 DC="docker compose --env-file $ENVFILE $ENVLOCAL -f docker-compose.yml"
@@ -45,11 +48,7 @@ SRC_PATH="$(envget SRC_PATH)"
 GL_ARGS="--report-format sarif --exit-code 0 --redact --config /config/gitleaks.toml"
 
 # Discover repos as paths RELATIVE to SRC_PATH (which the container sees as /repo).
-mapfile -t rels < <(
-  if [ -d "$SRC_PATH/.git" ]; then echo "."; else
-    for d in "$SRC_PATH"/*/; do [ -d "$d.git" ] && basename "$d"; done
-  fi
-)
+mapfile -t rels < <(discover_repos "$SRC_PATH")
 
 # Clear stale partials AND a previous merged report. The old report may be root-owned
 # (written by the compose gitleaks service in a pre-fix run); rm works because the reports
@@ -77,41 +76,14 @@ else
 fi
 
 # Merge every partial SARIF into the one file gate.sh / dashboard.py consume.
-python3 - "$REPORTS" <<'PY'
-import glob, json, os, sys
-rep = sys.argv[1]
-parts = sorted(glob.glob(os.path.join(rep, "_gl_*.sarif")))
-base, results = None, []
-for f in parts:
-    try:
-        d = json.load(open(f))
-    except Exception:
-        continue
-    run = (d.get("runs") or [{}])[0]
-    results.extend(list(run.get("results") or []))   # copy BEFORE base may alias d
-    if base is None:
-        base = d
-if base is None:
-    # NO es un resultado limpio: no corrió nada. Escribir aquí un SARIF vacío pero válido es lo
-    # más peligroso que puede hacer este script — gate.sh cuenta ruleIds sobre un archivo que
-    # EXISTE, ve cero y estampa "PASS secretos: 0". Un escaneo que nunca ocurrió se convierte en
-    # una aprobación, que es precisamente el modo de fallo contra el que está escrito todo este
-    # laboratorio.
-    #
-    # Dejar el archivo AUSENTE hace que sarif_count devuelva -1, y el gate ya sabe decir
-    # "gitleaks not run". La ausencia de un escaneo no puede parecerse a la ausencia de
-    # hallazgos.
-    print("secrets: ningún pase produjo resultados — NO se escribe gitleaks.sarif.")
-    print("         La dimensión queda NO EJECUTADA, que no es lo mismo que «sin hallazgos».")
-    for f in parts:
-        os.remove(f)
-    sys.exit(3)
-base["runs"][0]["results"] = results
-json.dump(base, open(os.path.join(rep, "gitleaks.sarif"), "w"), indent=2)
-for f in parts:
-    os.remove(f)
-print(f"secrets: merged {len(parts)} pass(es) -> gitleaks.sarif ({len(results)} findings)")
-PY
+#
+# El fusionador vivía AQUÍ, incrustado, y con él la regla más importante de todo esto: si ningún
+# pase produjo resultados legibles, NO se escribe el archivo. Ahora vive en tools/sarif-merge.py
+# porque las dimensiones de código también corren una vez por repositorio y necesitaban la misma
+# regla — y una regla así copiada dos veces es una regla que en algún momento solo se cumple una.
+# El razonamiento completo (y el «0 secretos» sobre un repositorio con un token commiteado que la
+# motivó) está en la cabecera de ese archivo.
+tools/sarif-merge.py "$REPORTS/gitleaks.sarif" "$REPORTS"/_gl_*.sarif
 
 # trufflehog is the corroborating pass (live-verifies a subset). It is NOT on the gate's
 # critical path — only gitleaks.sarif is — and its git-history scan is slow on large repos,

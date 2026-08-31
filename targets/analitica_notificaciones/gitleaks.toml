@@ -1,0 +1,90 @@
+# gitleaks — reglas escritas PARA analitica_notificaciones, no el ejemplo genérico.
+#
+# POR QUÉ NO SIRVE LA PLANTILLA. Su `env-assigned-secret` marca `[A-Z0-9_]*(PASSWORD|...)=\S{4,}`
+# sobre cualquier archivo. Este proyecto es Python (FastAPI) + un plugin PHP de Moodle: esa regla
+# marcaría cada `settings.moodle_db_password` de `api/config.py` y cada `password=` de las cadenas
+# de conexión que el código CONSTRUYE, que es el código que MANEJA credenciales, no las que las
+# contiene. El ruido entierra lo que de verdad hay aquí, que no es poco.
+#
+# LO QUE DE VERDAD HAY, leído del repositorio (no de un catálogo): `.env` está versionado con
+# valores reales — la dimensión de contrato de despliegue ya lo marca CRÍTICO (D4), y aquí gitleaks
+# lo confirma sobre la HISTORIA, que es donde un secreto queda para siempre aunque se borre del
+# árbol. Las formas concretas salen de ese `.env` y de `api/config.py`.
+
+[extend]
+useDefault = true   # AWS, llaves privadas, JWT genéricos
+
+# --- La clave HS256 del JWT propio de la aplicación -----------------------------------------
+# api/auth.py firma los tokens de sesión con REPORTES_SECRET_KEY (HS256). Quien la tenga puede
+# forjar un JWT válido para CUALQUIER usuario, incluido un admin: es la credencial más sensible
+# del sistema. En `.env` está con un valor real (`zajuna_reportes_secure_2026_xK9mP`), no un
+# marcador. El default de código `change-me-in-production` se excluye: api/main.py se niega a
+# arrancar con él, así que no es un secreto sino un centinela.
+[[rules]]
+id = "reportes-secret-key"
+description = "Clave HS256 del JWT de la aplicación (firma la sesión de cualquier usuario)"
+regex = '''(?i)REPORTES_SECRET_KEY[ \t]*=[ \t]*[^\s#<$"'`]{8,}'''
+tags = ["analitica", "jwt"]
+[rules.allowlist]
+stopwords = ["change-me-in-production", "changeme", "cambiame", "openssl", "rand"]
+regexes = ['''(<[^>]*>|\$\{[^}]*\})''']
+
+# --- Contraseñas de base de datos en archivos de configuración ------------------------------
+# Tres variables, todas en `.env`: DATABASE_PASSWORD y POSTGRES_PASSWORD (Control DB) y
+# MOODLE_DB_PASSWORD (la BD de Moodle en solo lectura). En `.env` la de Moodle es `12345` — corta,
+# pero real, y contra el superusuario `postgres` (lo marca también el contrato, riesgo §22).
+# `[ \t]` y no `\s`: en RE2 `\s` incluye el salto de línea y una variable vacía se comería la
+# línea siguiente. Solo `PASS(WORD)`: un usuario no es una credencial.
+[[rules]]
+id = "analitica-db-password"
+description = "Contraseña de base de datos asignada en archivo de configuración"
+regex = '''(?i)\b(DATABASE|POSTGRES|MOODLE_DB)_PASSWORD[ \t]*=[ \t]*[^\s#<$"'`]{3,}'''
+path = '''(?i)(\.env($|\.)|\.(ini|conf|cfg|ya?ml|properties)$)'''
+tags = ["analitica", "config"]
+[rules.allowlist]
+stopwords = ["changeme", "cambiame", "superset", "tu_password", "password_local"]
+regexes = ['''(<[^>]*>|\$\{[^}]*\}|tu[-_][a-zA-Z_]*)''']
+
+# --- Cadena de conexión con credenciales embebidas ------------------------------------------
+# api/config.py compone `postgresql+psycopg2://user:pass@host:port/db`. Si una de esas cadenas
+# llegara a un archivo con la contraseña puesta (un dump de configuración, un log, un .md de
+# traspaso), esta regla la ve aunque no sea un `.env`. `docs/CONTEXTO_TRASPASO.md` es justo el
+# tipo de documento donde eso aparece.
+[[rules]]
+id = "analitica-inline-dsn"
+description = "DSN de PostgreSQL con usuario:contraseña embebidos"
+regex = '''(?i)postgres(ql)?(\+psycopg2)?://[a-z0-9_]+:[^\s@:/<${'"]{3,}@'''
+tags = ["analitica", "dsn"]
+
+# --- wstoken de Moodle en una URL de autologin ----------------------------------------------
+# El SSO entra por `/api/auth/moodle-autologin?token=<wstoken>`, y el wstoken es un hex de 32 que
+# da acceso a la sesión. Si uno queda escrito en un .md, un log de ejemplo o un script de
+# diagnóstico (el repo trae varios: diagnostico_josso*.sh, josso_inspect_*.sh), es una sesión
+# reutilizable en claro. Se acota a la forma exacta para no marcar cualquier hex de 32.
+[[rules]]
+id = "analitica-moodle-wstoken"
+description = "wstoken de Moodle (hex 32) en una URL o variable de token"
+regex = '''(?i)(moodle-autologin\?token=|wstoken[ \t]*=[ \t]*|[?&]token=)[0-9a-f]{32}\b'''
+tags = ["analitica", "moodle"]
+
+# --- Qué NO es un hallazgo aquí --------------------------------------------------------------
+[allowlist]
+description = "Ruido conocido de este proyecto, revisado una a una"
+paths = [
+  # Bytecode: no es fuente, y su ruido de cadenas es enorme. No debería estar versionado
+  # (lo está: 27 .pyc), y eso es un hallazgo de calidad, no de secretos.
+  '''(^|/)__pycache__/''',
+  '''\.pyc$''',
+  # Copias de trabajo de las consultas y pruebas sin filtros: SQL de solo lectura, sin
+  # credenciales. Son ruido para el escaneo de secretos (el de calidad sí las mira).
+  '''(^|/)api/sql/copias/''',
+  '''(^|/)pruebas_sql/''',
+]
+regexes = [
+  # El código Python que USA las credenciales, no las que las contiene: `settings.moodle_db_password`,
+  # `self.control_db_password`, `password=%s` de un cursor parametrizado.
+  '''(settings|self)\.[a-z_]*(password|secret|token)''',
+  '''\bpassword[ \t]*=[ \t]*%s''',
+  # El centinela que fuerza el fallo de arranque, no un secreto.
+  '''change-me-in-production''',
+]

@@ -1,0 +1,127 @@
+# ZAP — plan escrito PARA encuestas, no el ejemplo de la plantilla.
+#
+# POR QUÉ NO SIRVE UN CRAWLER A SECAS, y aquí con más razón que de costumbre:
+#
+#   1. La superficie es una SPA en `/encuestados/` y una API REST en `/api`. El spider clásico
+#      sigue enlaces `<a href>`; la SPA no tiene ninguno hacia la API — las rutas viven dentro
+#      de un bundle JS minificado (`assets/js/index-DiXQT9Lk.js`). Sin la lista de abajo, ZAP
+#      escanearía la portada y nada más, y el informe diría «sin hallazgos» sobre el 95 % de la
+#      aplicación sin mirarla.
+#
+#   2. EL CATCH-ALL LO ENVENENA TODO. El `/` de zajunavideo5 sirve el CMS de ZAJUNA y responde
+#      200 con la MISMA página a cualquier ruta inexistente: `/noexiste-xyz-123` devuelve
+#      exactamente lo que `/encuestas`. Un spider suelto por ahí encuentra miles de «páginas»
+#      que son la misma, y ninguna es de este proyecto. Por eso el contexto EXCLUYE todo lo que
+#      no cuelgue de `/api` o `/encuestados`. Es el defecto L-R2-05 del laboratorio, que aquí
+#      además falsearía la cobertura hacia arriba.
+#
+# LAS RUTAS SALEN DE `routes/api.php` (699 líneas), leídas y clasificadas por su middleware:
+# lo PÚBLICO —sin `auth:sanctum`— es la superficie que puede atacar cualquiera de internet, y
+# es donde ZAP tiene algo que decir. Lo autenticado lo cubre la matriz de Playwright, que sí
+# tiene sesión.
+#
+# SOLO LECTURA Y SIN FUERZA BRUTA, y no por prudencia genérica:
+#   · `/api/login` tiene `throttle:login` (5/min, comprobado: `X-RateLimit-Limit: 5`). Un
+#     escáner activo lo agota en segundos y a partir de ahí mide el limitador, no la aplicación
+#     — y de paso puede BLOQUEAR las cuentas reales de la fábrica que nos prestaron.
+#   · Los POST públicos de respuesta a encuesta (`survey-email/submit-response`,
+#     `manual-survey/submit-with-token`) ESCRIBEN en la base del equipo. Un escáner activo
+#     sobre ellos ensucia datos reales de un servidor de prueba compartido. Quedan en el
+#     contexto para que se vean, y EXCLUIDOS del escaneo activo.
+
+env:
+  contexts:
+    - name: encuestas
+      # ${ZAP_TARGET_URL} lo inyecta el compose desde APP_INTERNAL_URL — NO se incrusta la URL,
+      # para que el mismo plan sirva contra el despliegue del equipo (zajunavideo5) y contra el
+      # LOCAL (host.docker.internal:8095). Contra el local, el activeScan termina en minutos sin
+      # latencia de red ni riesgo para el rate-limit de las cuentas reales del equipo.
+      urls:
+        - "${ZAP_TARGET_URL}/api/contact-info"
+      includePaths:
+        - "${ZAP_TARGET_URL}/api.*"
+      excludePaths:
+        # Todo lo que no sea /api (el backend local no sirve la SPA; en el remoto, el CMS/catch-all).
+        - "${ZAP_TARGET_URL}/(?!api).*"
+        # Cierra sesión: si ZAP lo llama, el resto del escaneo va sin autenticar y todos los
+        # 401 posteriores parecerían hallazgos de control de acceso.
+        - ".*/api/logout.*"
+        # Escriben en la base de datos: se excluyen del escaneo activo.
+        - ".*/api/survey-email/submit-response.*"
+        - ".*/api/manual-survey/submit-with-token.*"
+        - ".*/api/public/survey-responses.*"
+        - ".*/api/public/manual-survey-responses.*"
+        - ".*/api/survey-answers/from-hash.*"
+        - ".*/api/login.*"
+      authentication:
+        method: "manual"
+        # Deliberadamente SIN autenticar. La sesión de Sanctum vive en un token que la SPA
+        # guarda en localStorage tras el SSO de Zajuna: ZAP no puede reproducir ese flujo, y
+        # fingir que sí llenaría el informe de 401 disfrazados de hallazgos. La superficie
+        # autenticada la mide la matriz de Playwright, que sí tiene sesión de verdad.
+  parameters:
+    failOnError: true
+    progressToStdout: true
+
+jobs:
+  - type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 20
+
+  # ---- La superficie pública, enumerada a mano ------------------------------------------
+  #
+  # Cada una de estas rutas está declarada en routes/api.php FUERA del grupo
+  # `auth:sanctum` — es decir, alcanzable por cualquiera desde internet sin credencial.
+  - type: import
+    parameters:
+      type: "url"
+      fileName: "/zap/wrk/zap/urls-publicas.txt"
+
+  - type: spider
+    parameters:
+      context: encuestas
+      url: "${ZAP_TARGET_URL}/api/contact-info"
+      maxDuration: 3
+      maxDepth: 4
+
+  # SIN spiderAjax A PROPÓSITO. El AJAX spider levanta un Firefox headless para renderizar una
+  # SPA y ver las peticiones que su JS lanza — tiene sentido sobre `/encuestados/`, no sobre una
+  # API REST. El target efectivo de este plan es `/api` (endpoints JSON), y ahí Firefox no
+  # descubre nada que la lista `urls-publicas.txt` + el spider normal no traigan ya. Además ese
+  # Firefox era lo que reventaba la memoria (exit 137 en R1/R2, ver BITACORA L-R5-e): un coste
+  # enorme por cero cobertura sobre una API. La superficie de la SPA se cubre por otra vía
+  # (la matriz de Playwright y el recorrido MCP), no por ZAP.
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  # ---- Escaneo activo: NO EJECUTADO en este plan, y por qué ------------------------------
+  #
+  # El job `activeScan` se RETIRÓ tras tres corridas que murieron con exit 137 (SIGKILL del
+  # cgroup) contra este target — el heap JVM de ZAP está fijado a -Xmx1536m en el compose y el
+  # escaneo activo sobre HTTPS remoto acumula estado hasta reventar, incluso con ZAP_MEM=4g.
+  # (Ver BITACORA L-R5-f.)
+  #
+  # No se declara como «sin hallazgos» —eso sería mentir— sino como NO CONCLUYENTE con su razón,
+  # y con la cobertura de lo que habría buscado, hecha por OTRAS vías que sí concluyeron:
+  #   · XSS (40012/40014/40016): DESCARTADO por código. Los 4 sinks `dangerouslySetInnerHTML`
+  #     de la SPA tienen 7 llamantes y los 7 sanean con DOMPurify/sanitizeHTML (revisado a mano).
+  #   · Path traversal (regla 6): VERIFICADO a mano contra el despliegue — `/api/storage/images`
+  #     y `/api/editor-images` devuelven 400/404 a `../../etc/passwd`, nunca 200 (spec de
+  #     mecanismos de Playwright, que sí pasó).
+  #   · SQLi (40018-22): apagado a propósito (la API va contra la réplica real de Zajuna con
+  #     20.070 usuarios; una inyección por tiempo la satura). Cubierto por semgrep sobre el
+  #     código y la revisión de ZajunaFilterRepository.
+  # Queda el PASSIVE scan, que sí corrió sobre 58 URLs y aporta cabeceras/cookies/disclosure.
+
+  - type: report
+    parameters:
+      template: "sarif-json"
+      reportDir: "/zap/wrk/reports"
+      reportFile: "zap.sarif.json"
+  - type: report
+    parameters:
+      template: "traditional-html"
+      reportDir: "/zap/wrk/reports"
+      reportFile: "zap.html"

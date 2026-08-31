@@ -1,0 +1,122 @@
+# Registro de hallazgos — identidad estable entre rondas.
+# Lo mantiene tools/report.py; responsable y severidad se ajustan A MANO.
+# Un id emitido NO se reasigna nunca.
+id	sub	clave	titulo	severidad	dimension	responsable	esfuerzo	abierto_en	cerrado_en	estado
+I1			CSRF: manage.php cambia estado (visibilidad/orden) por GET sin sesskey	medium	playwright	Carlos Eduardo Ortiz	bajo	1		abierto
+I2			pluginfile.php: fallback sirve archivo de OTRA imagen por nombre y no comprueba visibilidad	medium	semgrep	Carlos Eduardo Ortiz	medio	1		abierto
+I3			Imágenes almacenadas como base64 en la base `moodle` compartida (no en el file storage)	medium	semgrep	Carlos Eduardo Ortiz	alto	1		abierto
+I4			Sentencias error_log() de depuración dejadas en producción	low	semgrep	Carlos Eduardo Ortiz	bajo	1		abierto
+I5			Asimetría de guardas: view.php sin require_capability y href sin rel=noopener	low	playwright	Carlos Eduardo Ortiz	bajo	1		abierto
+I6			Contraseña SSH en claro versionada en la historia (REPORTE_QA_SEGURIDAD.md)	high	secrets	Carlos Eduardo Ortiz	medio	1		abierto
+C1			Tres de los cuatro manuales describen una pila (WAMP/Windows/MySQL) que no existe en la fábrica	high	deploy-contract	Carlos Eduardo Ortiz	medio	1		abierto
+C2			El manual gobernante describe Apache+mod_php; el entorno real es nginx+php-fpm	high	deploy-contract	Carlos Eduardo Ortiz	medio	1		abierto
+C3			Requisitos de plataforma contradictorios entre manuales (PHP 7.4/MySQL vs 8.0+/PostgreSQL)	medium	deploy-contract	Carlos Eduardo Ortiz	bajo	1		abierto
+C5			Cuatro manuales del mismo despliegue, tres obsoletos, sin uno que anule a los otros	medium	deploy-contract	Carlos Eduardo Ortiz	bajo	1		abierto
+C6			Sin integración continua en el repositorio	medium	deploy-contract	Carlos Eduardo Ortiz	medio	1		abierto
+H1		sonar|php:S6600|anuncios_del_curso/imagecarousel/adding_image.php	php:S6600	critical	sonar			1		abierto
+H2		sonar|php:S5361|anuncios_del_curso/imagecarousel/adding_image.php	php:S5361	critical	sonar			1		abierto
+H3		sonar|php:S1192|anuncios_del_curso/imagecarousel/adding_image.php	php:S1192	critical	sonar			1		abierto
+H4		sonar|php:S3776|anuncios_del_curso/imagecarousel/adding_image.php	php:S3776	critical	sonar			1		abierto
+H5		sonar|php:S6600|anuncios_del_curso/imagecarousel/carousel_content.php	php:S6600	critical	sonar			1		abierto
+H6		sonar|php:S1192|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S1192	critical	sonar			1		abierto
+H7		sonar|php:S6600|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S6600	critical	sonar			1		abierto
+H8		sonar|php:S3776|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S3776	critical	sonar			1		abierto
+H9		sonar|php:S6600|anuncios_del_curso/imagecarousel/db/install.php	php:S6600	critical	sonar			1		abierto
+H10		sonar|php:S3776|anuncios_del_curso/imagecarousel/db/upgrade.php	php:S3776	critical	sonar			1		abierto
+H11		sonar|php:S6600|anuncios_del_curso/imagecarousel/db/upgrade.php	php:S6600	critical	sonar			1		abierto
+H12		sonar|php:S6600|anuncios_del_curso/imagecarousel/delete.php	php:S6600	critical	sonar			1		abierto
+H13		sonar|php:S6600|anuncios_del_curso/imagecarousel/edit.php	php:S6600	critical	sonar			1		abierto
+H14		sonar|php:S5361|anuncios_del_curso/imagecarousel/edit.php	php:S5361	critical	sonar			1		abierto
+H15		sonar|php:S3776|anuncios_del_curso/imagecarousel/edit.php	php:S3776	critical	sonar			1		abierto
+H16		sonar|php:S1192|anuncios_del_curso/imagecarousel/edit.php	php:S1192	critical	sonar			1		abierto
+H17		sonar|php:S1192|anuncios_del_curso/imagecarousel/lang/en/imagecarousel.php	php:S1192	critical	sonar			1		abierto
+H18		sonar|php:S3776|anuncios_del_curso/imagecarousel/lib.php	php:S3776	critical	sonar			1		abierto
+H19		sonar|php:S6600|anuncios_del_curso/imagecarousel/lib.php	php:S6600	critical	sonar			1		abierto
+H20		sonar|php:S1192|anuncios_del_curso/imagecarousel/lib.php	php:S1192	critical	sonar			1		abierto
+H21		sonar|php:S6600|anuncios_del_curso/imagecarousel/manage.php	php:S6600	critical	sonar			1		abierto
+H22		sonar|php:S1192|anuncios_del_curso/imagecarousel/manage.php	php:S1192	critical	sonar			1		abierto
+H23		sonar|php:S5361|anuncios_del_curso/imagecarousel/manage.php	php:S5361	critical	sonar			1		abierto
+H24		sonar|php:S6600|anuncios_del_curso/imagecarousel/mod_form.php	php:S6600	critical	sonar			1		abierto
+H25		sonar|php:S6600|anuncios_del_curso/imagecarousel/view.php	php:S6600	critical	sonar			1		abierto
+H26		sonar|php:S6600|anuncios_del_curso/imagecarousel/webp-support.php	php:S6600	critical	sonar			1		abierto
+H27		sonar|php:S1192|anuncios_del_curso/imagecarousel/webp-support.php	php:S1192	critical	sonar			1		abierto
+H28		semgrep|generic.secrets.security.detected-ssh-password.detected-ssh-password|/src/REPORTE_QA_SEGURIDAD.md	generic.secrets.security.detected-ssh-password.detected-ssh-password	high	semgrep			1		abierto
+H29		sonar|php:S1142|anuncios_del_curso/imagecarousel/adding_image.php	php:S1142	high	sonar			1		abierto
+H30		sonar|php:S138|anuncios_del_curso/imagecarousel/adding_image.php	php:S138	high	sonar			1		abierto
+H31		sonar|php:S125|anuncios_del_curso/imagecarousel/adding_image.php	php:S125	high	sonar			1		abierto
+H32		sonar|php:S836|anuncios_del_curso/imagecarousel/adding_image.php	php:S836	high	sonar			1		abierto
+H33		sonar|javascript:S7761|anuncios_del_curso/imagecarousel/amd/src/load_styles.js	javascript:S7761	high	sonar			1		abierto
+H34		sonar|php:S1144|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S1144	high	sonar			1		abierto
+H35		sonar|php:S138|anuncios_del_curso/imagecarousel/db/upgrade.php	php:S138	high	sonar			1		abierto
+H36		sonar|php:S138|anuncios_del_curso/imagecarousel/edit.php	php:S138	high	sonar			1		abierto
+H37		sonar|php:S125|anuncios_del_curso/imagecarousel/edit.php	php:S125	high	sonar			1		abierto
+H38		sonar|php:S836|anuncios_del_curso/imagecarousel/edit.php	php:S836	high	sonar			1		abierto
+H39		sonar|php:S1142|anuncios_del_curso/imagecarousel/edit.php	php:S1142	high	sonar			1		abierto
+H40		sonar|php:S125|anuncios_del_curso/imagecarousel/lang/en/imagecarousel.php	php:S125	high	sonar			1		abierto
+H41		sonar|php:S4143|anuncios_del_curso/imagecarousel/lang/en/imagecarousel.php	php:S4143	high	sonar			1		abierto
+H42		sonar|php:S125|anuncios_del_curso/imagecarousel/lang/es/imagecarousel.php	php:S125	high	sonar			1		abierto
+H43		sonar|php:S4143|anuncios_del_curso/imagecarousel/lang/es/imagecarousel.php	php:S4143	high	sonar			1		abierto
+H44		sonar|php:S1142|anuncios_del_curso/imagecarousel/lib.php	php:S1142	high	sonar			1		abierto
+H45		sonar|php:S138|anuncios_del_curso/imagecarousel/lib.php	php:S138	high	sonar			1		abierto
+H46		sonar|php:S125|anuncios_del_curso/imagecarousel/lib.php	php:S125	high	sonar			1		abierto
+H47		sonar|php:S1066|anuncios_del_curso/imagecarousel/mod_form.php	php:S1066	high	sonar			1		abierto
+H48		sonar|css:S125|anuncios_del_curso/imagecarousel/styles.css	css:S125	high	sonar			1		abierto
+H49		sonar|php:S3358|anuncios_del_curso/imagecarousel/view.php	php:S3358	high	sonar			1		abierto
+H50		deploy-contract|D1|DEPLOY.md	D1	medium	deploy-contract			1		abierto
+H51		semgrep|generic.html-templates.security.var-in-href.var-in-href|/src/imagecarousel/templates/carousel.mustache	generic.html-templates.security.var-in-href.var-in-href	medium	semgrep			1		abierto
+H52		semgrep|generic.html-templates.security.unquoted-attribute-var.unquoted-attribute-var|/src/imagecarousel/templates/carousel.mustache	generic.html-templates.security.unquoted-attribute-var.unquoted-attribute-var	medium	semgrep			1		abierto
+H53		zap|10038|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10038	medium	zap			1		abierto
+H54		zap|90003|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	90003	medium	zap			1		abierto
+H55		sonar|php:S2003|anuncios_del_curso/imagecarousel/adding_image.php	php:S2003	low	sonar			1		abierto
+H56		sonar|php:S100|anuncios_del_curso/imagecarousel/adding_image.php	php:S100	low	sonar			1		abierto
+H57		sonar|php:S101|anuncios_del_curso/imagecarousel/adding_image.php	php:S101	low	sonar			1		abierto
+H58		sonar|php:S1131|anuncios_del_curso/imagecarousel/adding_image.php	php:S1131	low	sonar			1		abierto
+H59		sonar|php:S1784|anuncios_del_curso/imagecarousel/adding_image.php	php:S1784	low	sonar			1		abierto
+H60		sonar|php:S1793|anuncios_del_curso/imagecarousel/adding_image.php	php:S1793	low	sonar			1		abierto
+H61		sonar|javascript:S7773|anuncios_del_curso/imagecarousel/amd/src/load_styles.js	javascript:S7773	low	sonar			1		abierto
+H62		sonar|javascript:S7741|anuncios_del_curso/imagecarousel/amd/src/load_styles.js	javascript:S7741	low	sonar			1		abierto
+H63		sonar|php:S1131|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S1131	low	sonar			1		abierto
+H64		sonar|php:S1488|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S1488	low	sonar			1		abierto
+H65		sonar|php:S100|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S100	low	sonar			1		abierto
+H66		sonar|php:S1481|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S1481	low	sonar			1		abierto
+H67		sonar|php:S1793|anuncios_del_curso/imagecarousel/classes/utils/images.php	php:S1793	low	sonar			1		abierto
+H68		sonar|php:S113|anuncios_del_curso/imagecarousel/db/access.php	php:S113	low	sonar			1		abierto
+H69		sonar|php:S1131|anuncios_del_curso/imagecarousel/db/access.php	php:S1131	low	sonar			1		abierto
+H70		sonar|php:S100|anuncios_del_curso/imagecarousel/db/install.php	php:S100	low	sonar			1		abierto
+H71		sonar|php:S2003|anuncios_del_curso/imagecarousel/db/install.php	php:S2003	low	sonar			1		abierto
+H72		sonar|php:S1131|anuncios_del_curso/imagecarousel/db/upgrade.php	php:S1131	low	sonar			1		abierto
+H73		sonar|php:S100|anuncios_del_curso/imagecarousel/db/upgrade.php	php:S100	low	sonar			1		abierto
+H74		sonar|php:S1793|anuncios_del_curso/imagecarousel/db/upgrade.php	php:S1793	low	sonar			1		abierto
+H75		sonar|php:S2003|anuncios_del_curso/imagecarousel/db/upgrade.php	php:S2003	low	sonar			1		abierto
+H76		sonar|php:S113|anuncios_del_curso/imagecarousel/delete.php	php:S113	low	sonar			1		abierto
+H77		sonar|php:S2003|anuncios_del_curso/imagecarousel/delete.php	php:S2003	low	sonar			1		abierto
+H78		sonar|php:S1131|anuncios_del_curso/imagecarousel/delete.php	php:S1131	low	sonar			1		abierto
+H79		sonar|php:S2003|anuncios_del_curso/imagecarousel/edit.php	php:S2003	low	sonar			1		abierto
+H80		sonar|php:S1131|anuncios_del_curso/imagecarousel/edit.php	php:S1131	low	sonar			1		abierto
+H81		sonar|php:S100|anuncios_del_curso/imagecarousel/edit.php	php:S100	low	sonar			1		abierto
+H82		sonar|php:S101|anuncios_del_curso/imagecarousel/edit.php	php:S101	low	sonar			1		abierto
+H83		sonar|php:S1793|anuncios_del_curso/imagecarousel/edit.php	php:S1793	low	sonar			1		abierto
+H84		sonar|php:S113|anuncios_del_curso/imagecarousel/lang/es/imagecarousel.php	php:S113	low	sonar			1		abierto
+H85		sonar|php:S100|anuncios_del_curso/imagecarousel/lib.php	php:S100	low	sonar			1		abierto
+H86		sonar|php:S1131|anuncios_del_curso/imagecarousel/lib.php	php:S1131	low	sonar			1		abierto
+H87		sonar|php:S1793|anuncios_del_curso/imagecarousel/lib.php	php:S1793	low	sonar			1		abierto
+H88		sonar|php:S1481|anuncios_del_curso/imagecarousel/lib.php	php:S1481	low	sonar			1		abierto
+H89		sonar|php:S2003|anuncios_del_curso/imagecarousel/manage.php	php:S2003	low	sonar			1		abierto
+H90		sonar|php:S1131|anuncios_del_curso/imagecarousel/manage.php	php:S1131	low	sonar			1		abierto
+H91		sonar|php:S1793|anuncios_del_curso/imagecarousel/manage.php	php:S1793	low	sonar			1		abierto
+H92		sonar|php:S100|anuncios_del_curso/imagecarousel/manage.php	php:S100	low	sonar			1		abierto
+H93		sonar|php:S1131|anuncios_del_curso/imagecarousel/mod_form.php	php:S1131	low	sonar			1		abierto
+H94		sonar|php:S101|anuncios_del_curso/imagecarousel/mod_form.php	php:S101	low	sonar			1		abierto
+H95		sonar|php:S113|anuncios_del_curso/imagecarousel/view.php	php:S113	low	sonar			1		abierto
+H96		sonar|php:S2003|anuncios_del_curso/imagecarousel/view.php	php:S2003	low	sonar			1		abierto
+H97		sonar|php:S1131|anuncios_del_curso/imagecarousel/view.php	php:S1131	low	sonar			1		abierto
+H98		sonar|php:S113|anuncios_del_curso/imagecarousel/webp-support.php	php:S113	low	sonar			1		abierto
+H99		sonar|php:S1131|anuncios_del_curso/imagecarousel/webp-support.php	php:S1131	low	sonar			1		abierto
+H100		zap|10017|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10017	low	zap			1		abierto
+H101		zap|10036|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10036	low	zap			1		abierto
+H102		zap|10054|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10054	low	zap			1		abierto
+H103		zap|10096|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10096	low	zap			1		abierto
+H104		zap|10027|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10027	low	zap			1		abierto
+H105		zap|10104|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10104	low	zap			1		abierto
+H106		zap|10112|https://nginx.zajuna.com/zajuna/mod/imagecarousel/view.php	10112	low	zap			1		abierto
+H107		gitleaks|sshpass-inline-password|REPORTE_QA_SEGURIDAD.md	sshpass-inline-password	unranked	gitleaks			1		abierto

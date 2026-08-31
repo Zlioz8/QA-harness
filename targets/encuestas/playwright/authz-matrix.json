@@ -1,0 +1,69 @@
+[
+  {
+    "path": "/api/mis-encuestas",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ],
+    "note": "La razón de que exista la sesión del aprendiz. `EnsureAprendizAcotado::RUTAS_PERMITIDAS` la nombra explícitamente (`aprendiz.mis-encuestas`), así que B -> 200. A (instructor) no está acotado por ese middleware y solo pasa por `auth:sanctum` + `active.user`, así que también 200. Es el control POSITIVO de la matriz: si B recibiera 403 aquí, el cerco estaría roto por el lado de negar de más, que también es un defecto."
+  },
+  {
+    "path": "/api/current-user",
+    "method": "GET",
+    "allow": [
+      "A",
+      "B"
+    ],
+    "note": "Segunda ruta de la lista blanca (`current.user`). Devuelve los datos de QUIEN LLAMA, no de terceros. Ambos roles deben verla. Sirve además de sonda de sesión: si esto da 401, el adaptador de login falló y TODO lo demás de esta matriz sería un falso 'denegado' — comprobar aquí primero antes de creerse ningún 403."
+  },
+  {
+    "path": "/api/surveys",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "EL EJE PRINCIPAL DE LA MATRIZ. `surveys.index` NO está en RUTAS_PERMITIDAS, así que un aprendiz autenticado debe recibir 403 con el mensaje «Como aprendiz solo puedes ver y responder tus encuestas» (EnsureAprendizAcotado:69-72). A -> 200: el instructor sí lista encuestas. Un 200 para B significa que el cerco del aprendiz no se aplica en esta ruta, y como el middleware es de grupo, implicaría que TODO el grupo está desprotegido."
+  },
+  {
+    "path": "/api/roleandusers",
+    "method": "GET",
+    "allow": [],
+    "note": "Listado de usuarios con sus roles bajo `admin.role` (routes/api.php:233). VERIFICADO contra el despliegue local: ni funcionario (A) ni aprendiz (B) son admin, así que AMBOS reciben 403. `allow:[]` — solo admin/super_admin, que no juegan en esta matriz A/B. (En R1 la expectativa era [A]: error de la matriz, no del proyecto; corregido contra la realidad.)"
+  },
+  {
+    "path": "/api/users",
+    "method": "GET",
+    "allow": [],
+    "note": "SEGUNDO EJE: `admin.role` (EnsureAdminRole), un middleware DISTINTO del cerco del aprendiz. Ni A (instructor/editingteacher) ni B (aprendiz) son administradores de la aplicación, así que NADIE de esta matriz debería pasar: B choca antes con `aprendiz.acotado` (403) y A debe chocar con `admin.role`. `allow: []` = un 200 de cualquiera de los dos es una escalada de privilegio. OJO al interpretarlo: si A resultara ser admin en la aplicación, el 200 sería correcto y el fallo sería de la matriz — verificar el rol de A en la BD de la aplicación antes de imputar."
+  },
+  {
+    "path": "/api/users/store",
+    "method": "POST",
+    "allow": [],
+    "note": "Creación de usuarios bajo `admin.role`. Mismo eje que el anterior, pero en ESCRITURA: es el que convierte una lectura indebida en una toma de control. Se prueba POST porque un gate que solo cubre los GET del prefijo es un error real y frecuente."
+  },
+  {
+    "path": "/api/assign-role",
+    "method": "POST",
+    "allow": [],
+    "note": "Asignación de roles, bajo `admin.role`. La escalada más directa posible: quien la alcance se concede a sí mismo cualquier privilegio. `allow: []`."
+  },
+  {
+    "path": "/api/surveys/store",
+    "method": "POST",
+    "allow": [
+      "A"
+    ],
+    "note": "Creación de encuestas bajo `can.create.surveys` (routes/api.php:290) = super_admin/admin/funcionario/operario. VERIFICADO local: A (funcionario) pasa el gate y llega a la validación → 422 por body vacío (autorizado); B (aprendiz) → 403 por el cerco. Un 422 aquí PRUEBA la autorización correcta: el gate dejó pasar y falló el payload, no el permiso. (En R1 la expectativa era []: error de la matriz; el funcionario SÍ puede crear.)"
+  },
+  {
+    "path": "/api/logout",
+    "method": "POST",
+    "allow": [
+      "A",
+      "B"
+    ],
+    "note": "Tercera ruta de la lista blanca. Está ahí por una razón que el propio middleware documenta: «Negarlo dejaría a la persona sin poder salir». Se prueba EL ÚLTIMO de la matriz, porque invalida la sesión de quien lo llame."
+  }
+]

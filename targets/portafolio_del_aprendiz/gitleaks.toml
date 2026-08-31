@@ -1,0 +1,133 @@
+# gitleaks — guion escrito para local_portafolio (portafolio_del_aprendiz @ feature/v2 9674bda)
+#
+# POR QUÉ ESTE ARCHIVO NO ES EL DE LA PLANTILLA
+# La plantilla busca `PASSWORD=` en ficheros tipo .env. Este proyecto NO TIENE .env, y no por
+# descuido: su DEPLOY.md §6 lo dice y lo justifica — un plugin de Moodle toma su configuración de
+# `config.php` del núcleo y de la tabla `mdl_config_plugins` (vía `settings.php`), no del entorno.
+# Aplicarle la regla genérica sería medir un mecanismo que este sistema no usa y llamar al
+# resultado «0 secretos». Las formas que SÍ existen aquí se leyeron del código, una por una.
+#
+# LO QUE SE MIDIÓ ANTES DE ESCRIBIR ESTAS REGLAS (2026-08-25, sobre el árbol del commit):
+#   grep de (pass|pwd|secret|token|api_key|clave) asignados a literal -> 0 coincidencias en los
+#   46 ficheros... salvo la que importa: settings.php:34, el default de `integracion_dbpass`.
+# O sea: la superficie de secretos de este repo es pequeña y concreta. Eso hace que el ruido
+# genérico sea MÁS dañino, no menos — un hallazgo real entre cien falsos no se lee.
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+#  1. La credencial que este proyecto SÍ envía en el código
+# ---------------------------------------------------------------------------
+#
+# settings.php:34 declara la contraseña de la BD externa "integracion" con un DEFAULT literal:
+#     new admin_setting_configpasswordunmask('local_portafolio/integracion_dbpass',
+#         get_string('databasepass', 'install'), '', '12345')
+# y IntegracionDbConnection.php:45 hace lo propio con el usuario, cuyo default es `postgres`
+# — el SUPERUSUARIO del cluster — para una conexión que la propia clase documenta como «de solo
+# lectura». Un despliegue que no pase por la UI de administración se conecta con eso.
+#
+# El DEPLOY.md §6.2 lo llama «placeholder de desarrollo, no usar en un entorno con datos reales».
+# Que esté declarado cambia el RECLAMO, no el hecho: el valor sigue viajando en el repositorio y
+# es el que se usa si nadie lo cambia. Se detecta para que el informe pueda citarlo con línea.
+#
+# EL ANCLA ESTÁ EN EL TERCER ARGUMENTO VACÍO (`, '', `), y eso no es cosmética. El primer intento
+# fue `integracion_dbpass'[\s\S]{0,200}?,\s*'[^']{1,64}'\s*\)` y NO FUNCIONABA: la repetición
+# perezosa se detiene en el primer `, '...'` que encuentra, que es el `'install'` de la cadena de
+# idioma. La regla habría casado —dando sensación de cobertura— sobre el trozo equivocado, y el
+# «secreto» reportado habría sido la palabra `install`. Comprobado a mano contra el fichero antes
+# de darla por buena; un guion que dispara sobre lo que no es, no es mejor que uno que no dispara.
+#
+# secretGroup = 1 para que lo reportado sea el VALOR (`12345`) y no la firma entera de la
+# llamada: así el hallazgo se lee solo, y la allowlist de cadenas de idioma de más abajo no lo
+# silencia por arrastre.
+[[rules]]
+id = "portafolio-integracion-dbpass-default"
+description = "Contraseña por defecto de la BD externa 'integracion' embebida en settings.php"
+regex = '''(?s)integracion_dbpass'.{0,200}?,\s*'',\s*'([^']{1,64})'\s*\)'''
+secretGroup = 1
+path = '''settings\.php$'''
+tags = ["portafolio", "default-credential", "moodle-plugin"]
+
+# El mismo defecto por el otro lado: el fallback del código cuando la config está vacía.
+[[rules]]
+id = "portafolio-integracion-fallback-superuser"
+description = "Fallback a superusuario 'postgres' en la conexión externa de solo lectura"
+regex = '''integracion_dbuser'\)\s*\?:\s*'([^']+)\''''
+secretGroup = 1
+path = '''IntegracionDbConnection\.php$'''
+tags = ["portafolio", "default-credential"]
+
+# ---------------------------------------------------------------------------
+#  2. Datos personales reales embebidos en scripts de siembra
+# ---------------------------------------------------------------------------
+#
+# No es una credencial, y por eso ninguna regla genérica lo ve — pero es exactamente el tipo de
+# dato que no debe vivir en un repositorio. `cli/seed_rap.php` fija a mano:
+#     $ficid = 2872729;   $usrnumdoc = '1105461023';   $responsable = 7892233;
+# Una cédula de 10 dígitos, el documento de un instructor y el número de una ficha, REALES y
+# versionados. El propio fichero se declara «script de un solo uso — borrar tras usar» y sigue
+# en el árbol. En Colombia esto cae bajo la Ley 1581 de 2012 (Habeas Data).
+#
+# La regla se acota a `cli/` a propósito: un entero de 7-11 dígitos en el resto del código es un
+# id de Moodle, una marca de tiempo o una versión de plugin, y marcarlo enterraría lo real.
+[[rules]]
+id = "portafolio-pii-en-seeds"
+description = "Documento de identidad / ficha reales fijados en un script de siembra"
+regex = '''\$(usrnumdoc|responsable|ficid)\s*=\s*'?[0-9]{7,11}'?'''
+path = '''cli/.*\.php$'''
+tags = ["portafolio", "pii", "habeas-data"]
+
+# ---------------------------------------------------------------------------
+#  3. Formas de secreto propias de Moodle, por si aparecen en la historia
+# ---------------------------------------------------------------------------
+#
+# La historia son 23 commits, así que escanearla es barato y merece cubrir lo que un plugin de
+# Moodle podría haber arrastrado sin querer: un `config.php` del núcleo (lleva la contraseña de la
+# BD principal en claro) o un token de web service de 32 hex pegado en una prueba.
+[[rules]]
+id = "moodle-cfg-dbpass"
+description = "config.php de Moodle con la contraseña de la BD principal"
+regex = '''\$CFG->dbpass\s*=\s*['"][^'"]+['"]'''
+tags = ["moodle", "core-config"]
+
+[[rules]]
+id = "moodle-ws-token"
+description = "Token de web service de Moodle (32 hex) en el código"
+regex = '''(?i)(wstoken|privatetoken|[?&]token)\s*[=:]\s*['"]?[a-f0-9]{32}['"]?'''
+tags = ["moodle", "token"]
+
+# ---------------------------------------------------------------------------
+#  ALLOWLIST — preventiva, y HOY INERTE. Medido, no supuesto.
+# ---------------------------------------------------------------------------
+#
+# Lo primero que hay que decir, porque la tentación era escribir lo contrario: se comprobó
+# (2026-08-25) corriendo gitleaks sobre este árbol SOLO con el conjunto por defecto
+# (`[extend] useDefault = true` y nada más) y el resultado fue **«no leaks found»**. Ni una.
+#
+# O sea que estas dos exclusiones NO están quitando ruido: hoy no hay ruido que quitar. Se dejan
+# como red de seguridad para cuando el árbol cambie, pero se etiquetan como lo que son. Escribir
+# aquí «sin esto el escaneo se ahoga» habría sido inventar una justificación cómoda para una
+# decisión que nadie midió — que es el mismo defecto, en pequeño, que este laboratorio existe
+# para no cometer.
+[allowlist]
+description = "Preventiva: vendor minificado y cadenas de idioma. Medida como inerte el 2026-08-25."
+
+# FontAwesome vendorizado: el único código de terceros del repositorio, minificado. Si un día
+# trae cadenas que el conjunto por defecto confunda con claves, el ruido sería de un fichero que
+# este equipo no escribió ni puede arreglar.
+#
+# Matiz que NO se silencia aquí: que ese bundle esté vendorizado SIN VERSIÓN DECLARADA
+# (feature/migration traía `thirdpartylibs.xml`, v2 lo perdió) es un hallazgo real, y lo levanta
+# la dimensión de dependencias con su propia evidencia.
+paths = [
+  '''pix/icons/fontawesome/js/all\.min\.js$''',
+]
+
+# `databasepass`/`databasehost` son CLAVES DE CADENA DE IDIOMA de Moodle
+# (get_string('databasepass','install')): la etiqueta que se pinta en el formulario, no un valor.
+# Es la forma exacta del ruido que METODOLOGÍA §3 describe —en un PHP cualquiera, `password`
+# casi siempre nombra una variable— aunque en este árbol concreto todavía no se materialice.
+regexes = [
+  '''get_string\('database(pass|host|name|user)',\s*'install'\)''',
+]

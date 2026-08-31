@@ -53,3 +53,16 @@ baselines/*/*.tar.zst
 Lista de prioridad - QA.xlsx
 # Informes sueltos en la raíz: entregables, viven bajo reports/ (ya ignorado) o se entregan aparte.
 INFORME_TECNICO_VERIFICACION_R*_*.md
+
+# Copias del core Moodle local antes de cambios de despliegue: traen datos reales (tokens, usuarios).
+baselines/core-moodle-*/
+
+# Artefactos de despliegue local con credenciales de la máquina.
+targets/*/deploy-local/
+
+# --- portabilidad #8: insumos y baselines locales que no son código del lab ---
+# deps/: insumos que el repo no trae y el perfil aporta EN LOCAL (incluye .env sandbox con creds).
+targets/*/deps/*.env
+targets/*/deps/composer.*
+# baselines del core (config de nginx/pg_hba, fotos de convivencia): evidencia por-máquina, no lab.
+baselines/core-*/

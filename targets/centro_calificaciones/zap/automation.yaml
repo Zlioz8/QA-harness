@@ -1,0 +1,115 @@
+# OWASP ZAP Automation Framework — Centro de Calificaciones (lmsActividad + lms-califica).
+#
+# ALCANCE Y AUTORIZACIÓN. Escaneo contra el despliegue LOCAL del laboratorio (contenedor calif_web
+# en 127.0.0.1:8097), autorizado por el responsable de QA (2026-08-31). NO se apunta a
+# zajunavideo5.com: ese servidor es del equipo y un escaneo activo contra él no está autorizado
+# (allí solo se navegó, en lectura, para la matriz autoritativa). El destino lo fija
+# APP_INTERNAL_URL; la corrida queda fechada en RUN.md.
+#
+# QUÉ MIDE Y QUÉ NO. ZAP corre SIN la sesión del SSO, y en el despliegue local las apps NO tienen
+# cargadas las 45 funciones PL/pgSQL que el manual manda crear DENTRO de la BD del core (obtenerSession
+# entre ellas): un audit seguro no modifica el core compartido — ver COTEJO_DESPLIEGUE.md. Por eso:
+#   · login_config.php sin una fila de obtenerSession -> 302 a /zajuna/ o a error_conexion.php.
+#     Comprobar que redirige —y no que suelta un 500 con traza de PDO— ES la medida sin sesión.
+#   · Las vistas (views/*.php) y los controladores de acción (controllers/*.php) se piden para ver
+#     su robustez ante parámetros sin sesión: que degraden, no que revienten.
+#   · Lo que ZAP NO responde aquí es el control de acceso ENTRE usuarios (el bypass del sesskey):
+#     eso se probó AUTORITATIVAMENTE por navegador contra zajunavideo5.com (evidencia remoto-*).
+#
+# SIN AJAX SPIDER: estas apps se renderizan en servidor (PHP+Apache), no son SPA. El AJAX spider
+# reventó memoria en #6/#7 sin descubrir nada. Solo spider tradicional, acotado.
+env:
+  contexts:
+    - name: calif
+      urls:
+        - "${APP_INTERNAL_URL}/lmsActividad/"
+        - "${APP_INTERNAL_URL}/lms-califica/"
+      includePaths:
+        - "${APP_INTERNAL_URL}/lmsActividad/.*"
+        - "${APP_INTERNAL_URL}/lms-califica/.*"
+      excludePaths:
+        # No salir de las dos apps hacia el resto del host.
+        - "${APP_INTERNAL_URL}/zajuna/.*"
+  parameters:
+    failOnError: false
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: requestor
+    parameters:
+      user: ""
+    requests:
+      # --- estáticos: 200 directo de Apache (superficie sin sesión) --------------------
+      - url: "${APP_INTERNAL_URL}/lmsActividad/public/css/unificado.css"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lms-califica/public/css/styles.css"
+        method: GET
+      # --- el ENTRY del SSO: el eje de la auditoría. Se siembra con y sin parámetros ----
+      - url: "${APP_INTERNAL_URL}/lmsActividad/config/login_config.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lmsActividad/config/login_config.php?user=1&courseid=1&roleid=2&sesskey=x"
+        method: GET
+      # --- vistas (auth-gated): deben redirigir/degradar sin sesión, no 500 ------------
+      - url: "${APP_INTERNAL_URL}/lmsActividad/views/principal.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lmsActividad/views/actividades/general.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lmsActividad/views/actividades/unificados.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lmsActividad/views/actividades/unificadoap.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lmsActividad/views/actividades/reportes.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lms-califica/views/resultados/resultados.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lms-califica/views/resultados/resultadoap.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lms-califica/views/competencias.php"
+        method: GET
+      # --- controladores de acción: comportamiento ante GET sin sesión -----------------
+      - url: "${APP_INTERNAL_URL}/lmsActividad/controllers/toggle_rea_visible.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/lmsActividad/controllers/reportes_controller.php"
+        method: GET
+
+  - type: spider
+    parameters:
+      context: calif
+      url: "${APP_INTERNAL_URL}/lmsActividad/"
+      maxDuration: 3
+  - type: spider
+    parameters:
+      context: calif
+      url: "${APP_INTERNAL_URL}/lms-califica/"
+      maxDuration: 3
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  # Escaneo activo acotado al contexto (solo las dos apps). Inyección en los parámetros del entry
+  # (user, courseid, roleid, sesskey) y de las vistas. Tope de tiempo: no es el core compartido,
+  # es un contenedor efímero, pero igual se acota.
+  - type: activeScan
+    parameters:
+      context: calif
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 10
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.json
+  - type: report
+    parameters:
+      template: sarif-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap.sarif
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.html

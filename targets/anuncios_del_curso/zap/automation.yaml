@@ -1,0 +1,99 @@
+# ZAP — plan escrito PARA anuncios_del_curso (mod_imagecarousel), no el ejemplo de la plantilla.
+#
+# QUÉ SE ESCANEA. Un plugin de actividad de Moodle bajo /mod/imagecarousel/. Sus puntos de
+# entrada NO se descubren con un spider: la actividad se alcanza desde dentro de un curso
+# (course/view.php) con parámetros `id`=cmid que el crawler no conoce, y la vista embebida carga
+# su contenido por un fetch() a carousel_content.php con sesskey. Sin la lista de abajo, ZAP
+# vería la portada de login y nada del plugin. Las rutas salen del árbol del commit ef6c6e9,
+# leídas una a una (view.php:3, manage.php:2, edit.php:2, delete.php:7, adding_image.php:12,
+# carousel_content.php:9, webp-support.php:5 — todas con require('../../config.php')).
+#
+# ÁMBITO ACTIVO AUTORIZADO. El responsable de QA autorizó activeScan SIN restricción sobre
+# /zajuna, en los dos blancos (local y zajunavideo5). El core local es una réplica restaurable
+# desde el dump de las 08:26; si el escaneo lo degrada, se restaura. Consecuencia declarada, no
+# oculta: el activeScan tocará también rutas de Moodle CORE (login, lib, temas) que NO son de
+# este plugin; esos hallazgos se DESCUENTAN a mano en el triaje (bloque homónimo de target.env).
+#
+# SIN AJAX SPIDER. Reventó memoria en el #6 (exit 137) y aquí no aportaría: el contenido del
+# carrusel se sirve por un solo fetch a carousel_content.php que ya está en la lista. Un Firefox
+# headless sería coste enorme por cobertura cero (lección L-R5-e).
+#
+# SOLO LECTURA EN LA SIEMBRA. La lista de `url` de abajo son GET de lectura. Los endpoints que
+# ESCRIBEN por diseño se dejan fuera de la siembra para no crear/borrar imágenes en bucle:
+#   · adding_image.php (INSERT), edit.php?action=edit (UPDATE), delete.php (DELETE),
+#     manage.php?action=toggle|move (UPDATE de estado por GET — es justo el hallazgo S1).
+# El activeScan SÍ puede ejercitar sus PARÁMETROS de lectura (id, cmid, imageid) buscando
+# inyección y control de acceso; lo que no se hace es sembrarlos como flujo de escritura.
+
+env:
+  contexts:
+    - name: imagecarousel
+      urls:
+        - "${ZAP_TARGET_URL}/mod/imagecarousel/view.php"
+      includePaths:
+        - "\\Q${ZAP_TARGET_URL}/mod/imagecarousel/\\E.*"
+      excludePaths:
+        # Fuera del plugin: el catch-all del core sirve 200 a cualquier ruta y envenenaría la
+        # medición con "páginas" que son la misma portada (defecto L-R2-05). El activeScan sobre
+        # el resto de /zajuna está autorizado, pero el CONTEXTO se ancla al plugin para que la
+        # cobertura declarada sea la del sujeto y no la del CMS.
+        - "\\Q${ZAP_TARGET_URL}\\E/(?!mod/imagecarousel).*"
+        # logout: si ZAP lo llama, el resto va sin sesión y los 303 posteriores parecerían
+        # hallazgos de control de acceso.
+        - ".*/login/logout.*"
+      authentication:
+        # Deliberadamente SIN autenticar en este pase: mide la superficie que ve un anónimo, que
+        # es donde una fuga de autorización duele más (¿sirve el plugin algo sin sesión?). La
+        # matriz autenticada por rol la cubre la medición directa curl+navegador ya hecha, que es
+        # inequívoca. Un ZAP con sesión de Moodle exigiría reproducir el login+sesskey y llenaría
+        # el informe de 303 disfrazados de hallazgos.
+        method: "manual"
+
+jobs:
+  - type: passiveScan-config
+    parameters:
+      maxAlertsPerRule: 20
+      scanOnlyInScope: true
+
+  # Siembra explícita: las rutas de LECTURA del plugin. cmid/id de ejemplo (73985) — si no
+  # existe en el blanco, ZAP recibe el redirect/404 real, que es información, no un falso 200.
+  - type: import
+    parameters:
+      type: url
+      fileName: "/zap/wrk/zap/urls.txt"
+
+  - type: spider
+    parameters:
+      context: imagecarousel
+      url: "${ZAP_TARGET_URL}/login/index.php"
+      maxDuration: 3
+      maxDepth: 5
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  # Escaneo ACTIVO — autorizado por el responsable de QA (constancia en RUN.md).
+  - type: activeScan
+    parameters:
+      context: imagecarousel
+      policy: "Default Policy"
+      maxScanDurationInMins: 20
+      # Contra el rate-limit / disponibilidad del core compartido: se acota la duración, no la
+      # cobertura. Si muere por memoria, se sube ZAP_MEM (ya está a 8g) antes de recortar reglas.
+
+  - type: report
+    parameters:
+      template: "traditional-json"
+      reportDir: "/zap/wrk/reports"
+      reportFile: "zap-report.json"
+  - type: report
+    parameters:
+      template: "sarif-json"
+      reportDir: "/zap/wrk/reports"
+      reportFile: "zap.sarif.json"
+  - type: report
+    parameters:
+      template: "traditional-html"
+      reportDir: "/zap/wrk/reports"
+      reportFile: "zap.html"

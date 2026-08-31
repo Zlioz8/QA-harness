@@ -154,11 +154,45 @@ def cobertura(target: str, rep: str) -> list[dict]:
     return filas
 
 
+def _repos_bajo(src: str) -> list[str]:
+    """Repos git bajo SRC_PATH: el propio SRC_PATH, o sus hijos de un nivel. Una sola regla,
+    la misma que tools/lib-repos.sh, para que la cabecera del informe no mienta sobre qué se
+    auditó cuando SRC_PATH es un directorio padre."""
+    if not src or not os.path.isdir(src):
+        return []
+    if os.path.isdir(os.path.join(src, ".git")):
+        return [src]
+    hijos = []
+    for n in sorted(os.listdir(src)):
+        d = os.path.join(src, n)
+        if os.path.isdir(os.path.join(d, ".git")):
+            hijos.append(d)
+    return hijos
+
+
 # ---------------------------------------------------------------- bloques
 
 def cabecera(target: str, ronda: int, src: str, cob: list[dict]) -> str:
-    commit = sh(["git", "-C", src, "log", "-1", "--format=%h — «%s»"]) or "(sin checkout git)"
-    rama = sh(["git", "-C", src, "rev-parse", "--abbrev-ref", "HEAD"]) or "-"
+    # El commit se lee de los REPOSITORIOS bajo SRC_PATH, no del directorio que los contiene.
+    # SRC_PATH apunta al padre en un proyecto multi-repo (contrato del perfil), y `git -C <padre>`
+    # falla ahí: la cabecera decía "(sin checkout git)" sobre un proyecto perfectamente versionado
+    # — el mismo agujero que ya se tapó en tools/stamp.sh. `_repos_bajo` replica la única regla de
+    # descubrimiento (tools/lib-repos.sh) en Python, sin dependencias nuevas.
+    repos = _repos_bajo(src)
+    if len(repos) == 1:
+        commit = sh(["git", "-C", repos[0], "log", "-1", "--format=%h — «%s»"]) or "(sin checkout git)"
+        rama = sh(["git", "-C", repos[0], "rev-parse", "--abbrev-ref", "HEAD"]) or "-"
+    elif len(repos) > 1:
+        # Varios repos: se nombran todos. Un commit único cuando se auditaron dos árboles miente.
+        partes = []
+        for r in repos:
+            h = sh(["git", "-C", r, "rev-parse", "--short", "HEAD"]) or "?"
+            partes.append(f"{os.path.basename(r)}@{h}")
+        commit = " · ".join(partes)
+        rama = ", ".join(sorted({sh(["git", "-C", r, "rev-parse", "--abbrev-ref", "HEAD"]) or "-" for r in repos}))
+    else:
+        commit = "(sin checkout git)"
+        rama = "-"
     ejec = [c for c in cob if c["estado"] == "✅"]
     noej = [c for c in cob if "NO EJECUTADO" in c["estado"]]
     nodis = [c for c in cob if "NO DISPONIBLE" in c["estado"] or "NO APLICABLE" in c["estado"]]
@@ -279,9 +313,27 @@ def detalle(target: str, conf: list[dict], ronda: int, sin_triar: list[dict]) ->
             else:
                 out.append(f"**{TITULOS[k]}.** "
                            + FALTA.format(f"targets/{target}/hallazgos/{f['id']}.md") + "\n\n")
+        # Enlace a la ficha de FUNDAMENTACIÓN del riesgo (make riesgos): dónde/cómo/medios +
+        # OWASP/MITRE/STRIDE/CVSS/ISO 27001. Es la mitad probatoria y formativa del hallazgo.
+        ficha = os.path.join(LAB, "targets", target, "riesgos", f"{f['id']}.md")
+        if os.path.exists(ficha):
+            out.append(f"**Fundamentación (marcos + prueba de tangibilidad):** "
+                       f"`targets/{target}/riesgos/{f['id']}.md` — clasificado en OWASP, MITRE/CWE, "
+                       f"STRIDE, CVSS e ISO/IEC 27001.\n\n")
 
     if sin_triar:
-        out.append(f"### 3.x Señal sin triar ({len(sin_triar)})\n\n"
+        # ANÁLISIS antes que la tabla. Una tabla de reglas con ocurrencias es el vertido de la
+        # herramienta, no un informe: no deduce nada. Si el analista escribió
+        # `hallazgos/analisis-senal.md`, ESE es el mensaje de §3.x —qué dice la señal en conjunto,
+        # qué patrón, qué priorizar— y el desglose por regla queda plegado como respaldo. Sin él,
+        # se cae al texto genérico de siempre.
+        analisis = fragmento(target, "analisis-senal.md")
+        if analisis:
+            out.append(f"### 3.x Señal sin triar ({len(sin_triar)}) — análisis\n\n{analisis}\n\n"
+                       "<details><summary>Desglose por regla (respaldo de la señal)</summary>\n\n"
+                       "| Dimensión | Regla | Ocurrencias | Severidad |\n|---|---|---|---|\n")
+        else:
+            out.append(f"### 3.x Señal sin triar ({len(sin_triar)})\n\n"
                    "Producida por las herramientas y **todavía sin juicio humano**. No se detalla "
                    "arriba porque una lista sin triar no es un informe: buena parte de la señal de un "
                    "escáner es ruido en su contexto, y decidir cuál lo es resulta trabajo de una "
@@ -293,7 +345,7 @@ def detalle(target: str, conf: list[dict], ronda: int, sin_triar: list[dict]) ->
         for (dim, tit), fs in sorted(grupos.items(), key=lambda kv: -len(kv[1])):
             emoji, nombre = SEV.get(fs[0].get("severidad", "unranked"), ("⚪", "?"))
             out.append(f"| {dim} | `{tit}` | {len(fs)} | {emoji} {nombre} |\n")
-        out.append("\n")
+        out.append("</details>\n\n" if analisis else "\n")
 
     out.append("---\n\n")
     return "".join(out)

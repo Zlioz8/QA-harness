@@ -1,0 +1,20 @@
+[
+  {
+    "path": "/zea-api/api/v1/reports/login?courseid=${ZEA_COURSE_A}&mode=daily&granularity=day",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "El JWT de curso del rol A está atado a ZEA_COURSE_A y ese curso es donde A tiene viewreports (db/access.php: teacher/editingteacher/manager). A -> 200. El rol B (aprendiz) NO obtiene JWT para ESTE curso: token.php le da 403 (sin viewreports) y el adaptador zea-standalone devuelve un contexto sin Authorization, con lo que la API responde 401. Ambos caminos = denegado. LA CUENTA REAL DECIDE: si B resultara instructor de este curso, el 200 sería correcto, no un fallo — por eso ZEA_COURSE_B debe ser un curso donde B NO sea instructor."
+  },
+  {
+    "path": "/zea-api/api/v1/reports/activity-matrix?courseid=${ZEA_COURSE_A}",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "Mismo eje que el anterior sobre el reporte más pesado (cruza matriz por aprendiz). A -> 200; B denegado por el mismo motivo."
+  },
+  {
+    "path": "/zea-api/api/v1/reports/login?courseid=${ZEA_COURSE_B}&mode=daily&granularity=day",
+    "method": "GET",
+    "allow": [],
+    "note": "EL HALLAZGO QUE BUSCA ESTA MATRIZ: cross-course. El motor entra como A y como B; los dos usan su JWT (de A: curso ZEA_COURSE_A; de B: si lo consigue, curso ZEA_COURSE_B) para pedir el curso ZEA_COURSE_B con courseid en la URL. auth.AuthorizeCourse (jwt.go:70, activity_http.go:48) exige que el courseid del token CASE con el de la petición: A pidiendo ZEA_COURSE_B con un token de ZEA_COURSE_A debe recibir 403 forbidden. Si alguno de los dos recibe 200, el token de un curso está leyendo otro: fuga entre cursos. `allow: []` = nadie debería lograrlo por esta vía."
+  }
+]

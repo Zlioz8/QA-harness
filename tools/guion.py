@@ -39,7 +39,7 @@ import re
 # La unidad que importa en cada formato, y cómo se llama al leerla.
 UNIDAD = {
     "script": "peticiones", "plan": "peticiones", "specs": "pruebas",
-    "reglas": "reglas", "config": "ajustes",
+    "reglas": "reglas", "config": "ajustes", "flujos": "flujos",
 }
 
 # Ruido que no es una ruta del sistema auditado.
@@ -83,7 +83,13 @@ def _medir(path: str, kind: str) -> tuple[int, list[str]]:
         return 0, []
 
     if kind in ("script",):          # k6 y compañía: la unidad es la petición HTTP
-        return len(re.findall(r"\bhttp\.(get|post|put|patch|del|request)\b", texto)), _rutas(texto)
+        # Cuenta tanto las llamadas directas a `k6/http` como los ayudantes de lib/k6/session.js
+        # (`authedGet`/`authedPost`), que son la forma RECOMENDADA de pedir con la sesión ya
+        # montada: un script que solo usa el ayudante medía cero y se reportaba "vacío" teniendo
+        # ocho peticiones reales (medido en reportes_de_cursos).
+        n = len(re.findall(r"\bhttp\.(get|post|put|patch|del|request)\b", texto))
+        n += len(re.findall(r"\bauthed(?:Get|Post|Put|Patch|Delete)\s*\(", texto))
+        return n, _rutas(texto)
     if kind == "plan":
         if path.endswith(".jmx"):    # JMeter
             return texto.count("HTTPSampler"), _rutas(texto)
@@ -102,6 +108,12 @@ def _medir(path: str, kind: str) -> tuple[int, list[str]]:
         n = toml_rules or yaml_rules or yaml_keys
         toca = ["+ reglas por defecto de la herramienta"] if extiende else []
         return n, toca
+    if kind == "flujos":
+        # Guion de flujos de navegador (MCP): markdown con un item por flujo. La unidad es el
+        # FLUJO, y lo que "toca" son las rutas/hitos que nombra. Un guion con dos flujos genéricos
+        # cubre menos que uno con los ocho reales del sistema — la misma lógica que k6/Playwright.
+        flujos = len(re.findall(r"^\s*[-*]\s+\*\*", texto, re.M)) or len(re.findall(r"\bF\d+\b", texto))
+        return flujos, _rutas(texto)
     if kind == "config":
         return len(re.findall(r"^\s*[\w.-]+\s*[:=]", texto, re.M)), []
     return 0, []

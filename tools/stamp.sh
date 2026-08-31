@@ -25,17 +25,39 @@ DIM="${2:?falta la dimensión}"
 ENVFILE="targets/$TARGET/target.env"
 [ -f "$ENVFILE" ] || exit 0
 . "$(dirname "$0")/lib-env.sh"
+. "$(dirname "$0")/lib-repos.sh"
 
 DIR="reports/$TARGET/.provenance"
 mkdir -p "$DIR" 2>/dev/null || exit 0
 
 SRC_PATH=$(envget SRC_PATH)
-COMMIT="$(git -C "$SRC_PATH" rev-parse --short HEAD 2>/dev/null || echo '')"
-# Un árbol sucio no es el commit que dice ser: lo que se midió incluye cambios que nadie puede
-# recuperar desde esa revisión. Se marca, no se oculta.
-if [ -n "$COMMIT" ] && [ -n "$(git -C "$SRC_PATH" status --porcelain 2>/dev/null)" ]; then
-  COMMIT="$COMMIT+sucio"
-fi
+
+# EL COMMIT SE LEE DE LOS REPOSITORIOS, NO DE LA CARPETA QUE LOS CONTIENE.
+#
+# Esto era `git -C "$SRC_PATH" rev-parse` a secas, y el contrato del perfil dice que un proyecto
+# de varios repositorios apunta SRC_PATH al DIRECTORIO PADRE. Sobre un padre, `rev-parse` falla,
+# el `|| echo ''` lo tapaba, y TODA dimensión `needs: source` quedaba sellada
+# `commit: desconocido`. Un sello que no sabe contra qué midió no puede invalidar nada: la
+# maquinaria de procedencia entera —la que existe para que un veredicto no mezcle evidencia de
+# dos sistemas— se degradaba a un campo decorativo, sin que nada lo dijera.
+#
+# Con varios repositorios el commit NO es uno: se nombran todos. Un identificador solo sirve si
+# de verdad identifica lo medido, y «abc1234» cuando se auditaron dos árboles es una media
+# verdad que se lee como una entera.
+COMMIT=""
+while IFS= read -r _repo; do
+  [ -n "$_repo" ] || continue
+  _c="$(git -C "$_repo" rev-parse --short HEAD 2>/dev/null || echo '')"
+  [ -n "$_c" ] || continue
+  # Un árbol sucio no es el commit que dice ser: lo que se midió incluye cambios que nadie puede
+  # recuperar desde esa revisión. Se marca, no se oculta.
+  [ -n "$(git -C "$_repo" status --porcelain 2>/dev/null)" ] && _c="$_c+sucio"
+  if [ "$_repo" = "$SRC_PATH" ]; then
+    COMMIT="$_c"
+  else
+    COMMIT="${COMMIT:+$COMMIT }$(basename "$_repo")=$_c"
+  fi
+done < <(src_roots "$SRC_PATH")
 
 GUION=$(tools/dimensions.py --list script --where id="$DIM" 2>/dev/null | head -1)
 NEEDS=$(tools/dimensions.py --list needs --where id="$DIM" 2>/dev/null | head -1)

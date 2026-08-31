@@ -140,7 +140,27 @@ def sincronizar(target_dir: str, presentes: dict[str, dict], ronda: int,
         else:
             persistentes.append(f)
 
+    # Hallazgos de JUICIO HUMANO: los que produce leer el código, no una herramienta. Un
+    # "router admin nunca montado" o un "wstoken en la URL" no los emite ningún escáner, así que
+    # su clave nunca está en `presentes` — y sin esta guarda el reconciliador los cerraba en cada
+    # corrida, borrando exactamente el aporte que la metodología reserva a la persona. Su estado
+    # es autoritativo a mano: se reconocen por la dimensión (`codigo`/`manual`) o por el prefijo
+    # de clave, y el cruce con los escaneos no los toca. Se cierran editando el registro, como se
+    # abrieron.
+    def _es_humano(f: dict) -> bool:
+        # Sin clave de triaje no puede venir de un escaneo: lo redactó una persona. Y una dimensión
+        # conducida (codigo/manual/mcp-journey) tampoco re-emite su hallazgo en un artefacto que el
+        # cruce lea. En ambos casos su estado es autoritativo a mano.
+        if not (f.get("clave") or "").strip():
+            return True
+        if (f.get("dimension") or "").strip() in ("codigo", "manual", "mcp-journey"):
+            return True
+        clv = (f.get("clave") or "")
+        return clv.startswith("codigo|") or clv.startswith("manual|")
+
     for clave, f in por_clave.items():
+        if _es_humano(f):
+            continue
         if clave not in presentes and f.get("estado") in ("abierto", "reabierto"):
             f["estado"] = "cerrado"
             f["cerrado_en"] = str(ronda)

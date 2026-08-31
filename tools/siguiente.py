@@ -110,6 +110,12 @@ def pasos(target: str) -> list[dict]:
         "una lista sin juicio no es un informe: la mitad de las señales son ruido en su contexto, "
         "y decidir cuáles es trabajo humano")
 
+    add("riesgos", "Fundamentar cada hallazgo confirmado (OWASP/MITRE/STRIDE/CVSS/ISO 27001)",
+        _riesgos_hechos(target), f"make riesgos ANDAMIAR=1 TARGET={target}",
+        "por cada riesgo confirmado, un documento que PRUEBA que es tangible (dónde/cómo/medios) y "
+        "lo ancla a marcos reconocidos: material formativo para el equipo y trazabilidad para "
+        "una futura certificación ISO/IEC 27001")
+
     add("veredicto", "Veredicto y manifiesto de la corrida",
         existe(rep, "RUN.md"), f"make gate run-manifest TARGET={target}",
         "el veredicto y la cobertura real, para que el informe no pueda contradecirlos")
@@ -159,6 +165,17 @@ def _informe_hecho(target: str) -> bool:
     d = os.path.join(LAB, "reports", target)
     return os.path.isdir(d) and any(x.startswith("INFORME_TECNICO_VERIFICACION_R")
                                     for x in os.listdir(d))
+
+
+def _riesgos_hechos(target: str) -> bool:
+    # Verde cuando tools/riesgos.py sale 0: cada hallazgo confirmado tiene su documento de
+    # fundamentación completo. Se delega en la herramienta para no duplicar el criterio.
+    try:
+        r = subprocess.run([os.path.join(LAB, "tools", "riesgos.py"), target],
+                           capture_output=True, env={**os.environ, "LAB_DIR": LAB})
+        return r.returncode == 0
+    except Exception:
+        return False
 
 
 def main(argv: list[str]) -> int:

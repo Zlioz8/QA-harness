@@ -1,0 +1,44 @@
+[
+  {
+    "path": "/mod/imagecarousel/view.php?id=${IC_CMID}",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "CONTROL POSITIVO. view.php exige require_login($course,true,$cm) — matrícula en el curso — pero NO require_capability. A (editingteacher) y B (student) están ambos matriculados en C_0001, así que ambos ven la actividad (verificado en vivo: 200/200). Si B recibiera 303/403 aquí, el cerco estaría roto por negar de más. OJO de interpretación: view.php sólo emite las imágenes con visible=1 (getImages(...,true)), así que 'ver' no expone las ocultas — eso se comprueba en el recorrido, no en la matriz."
+  },
+  {
+    "path": "/mod/imagecarousel/carousel_content.php?cmid=${IC_CMID}",
+    "method": "GET",
+    "allow": [],
+    "note": "SONDA DE MECANISMO CSRF, no de rol. carousel_content.php exige require_sesskey() ANTES que la capability, así que una petición sin el parámetro sesskey correcto es rechazada para CUALQUIER rol (verificado en vivo: 404 incluso para A). allow:[] con este path SIN sesskey = ambos deben ser rechazados. Con sesskey válido, A y B pasan (view capability). Un 200 aquí sin sesskey sería un fallo de la guarda CSRF del endpoint AJAX."
+  },
+  {
+    "path": "/mod/imagecarousel/manage.php?id=${IC_CMID}",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "EJE PRINCIPAL. manage.php:19 -> require_capability('mod/imagecarousel:manageitems'). El arquetipo de esa capability (db/access.php) es editingteacher/manager/teacher, NO student. A -> 200 (gestiona). B -> denegado con 'nopermission' (verificado en vivo). Un acceso de B sería escalada: la gestión de imágenes del carrusel es escritura."
+  },
+  {
+    "path": "/mod/imagecarousel/adding_image.php?id=${IC_CMID}",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "adding_image.php:30 -> require_capability('mod/imagecarousel:manageitems'). Formulario de alta de imagen (INSERT). Mismo eje que manage. A -> 200, B -> nopermission (verificado)."
+  },
+  {
+    "path": "/mod/imagecarousel/edit.php?id=${IC_CMID}",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "edit.php:30 -> require_capability('mod/imagecarousel:manageitems'). Edición de imagen (UPDATE). A -> 200, B -> nopermission (verificado). edit.php usa moodleform, que valida sesskey en el POST, así que la escritura sí está protegida de CSRF (a diferencia de manage.php, hallazgo S1)."
+  },
+  {
+    "path": "/mod/imagecarousel/delete.php?id=${IC_CMID}&imageid=1",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "delete.php:20 -> require_capability('mod/imagecarousel:manageitems'), y ADEMÁS delete.php:46 exige confirm_sesskey() antes del DELETE real. A -> 200 (pantalla de confirmación), B -> nopermission (verificado). Es el HERMANO BIEN HECHO de manage.php: aquí el cambio de estado sí lleva sesskey; en manage.php no (S1)."
+  },
+  {
+    "path": "/mod/imagecarousel/webp-support.php?id=${IC_CMID}",
+    "method": "GET",
+    "allow": [],
+    "note": "webp-support.php:10 -> require_capability('moodle/site:config', context_system). Eso es privilegio de ADMINISTRADOR DEL SITIO, no de curso. Ni A (editingteacher) ni B (student) lo tienen: AMBOS deben ser denegados. allow:[] — un 200 de cualquiera de los dos sería escalada a una capability de sitio desde un rol de curso. (En zajunavideo5, admin_slider SÍ lo pasaría por ser siteadmin: eje autoritativo documentado aparte.)"
+  }
+]

@@ -1,0 +1,139 @@
+# OWASP ZAP Automation Framework — reportes_de_cursos (ZAJUNA Early Alert).
+#
+# ALCANCE Y AUTORIZACIÓN. Escaneo ACTIVO, autorizado por el responsable de QA (21/08/2026) contra
+# DOS destinos, en este orden y nunca a la vez: primero el despliegue LOCAL (nginx del core,
+# `/zea-api/` y `/zea-dashboard/`), y después el servidor de pruebas `https://zajunavideo5.com`
+# para confirmar lo medido. El destino lo fija `APP_INTERNAL_URL` del perfil; cada corrida queda
+# fechada en RUN.md. No apuntar esto a otro host sin una nueva ventana de autorización.
+#
+# ZAP CORRE SIN AUTENTICAR, y aquí eso importa más que en otros proyectos: las ocho rutas de
+# reportes exigen un JWT DE CURSO (dos saltos: login.php -> token.php -> Bearer), así que ZAP
+# recibirá 401 en todas. Eso NO las deja sin medir: comprobar que responden 401 —y no 200, ni un
+# 500 que filtre la traza— ES la medida. Lo que ZAP no puede responder aquí es si un usuario
+# alcanza el curso de OTRO: esa es la matriz de Playwright.
+#
+# TRES PARTICULARIDADES DE ESTE SISTEMA QUE OBLIGAN A ESTA CONFIGURACIÓN:
+#
+# 1. NO HAY NADA QUE RASTREAR. La API sirve JSON y el SPA es un index.html que llama por fetch();
+#    un spider siguiendo enlaces no descubre ni una ruta de reportes. La superficie se declara a
+#    mano abajo (job `requestor`), sacada de `docs/api/openapi.json` y de `cmd/server/app.go`.
+#
+# 2. EL `/` DE ESTE ORIGEN NO ES LA APLICACIÓN. En esta máquina y en el servidor, `/` sirve un CMS
+#    y Moodle vive bajo `/zajuna`. Ese CMS devuelve **200 con HTML para cualquier ruta inventada**
+#    (comprobado el 21/08/2026: `GET /ruta-inventada-xyz/health` -> 200). Si se deja a ZAP suelto
+#    por `/`, escanea el CMS de otro equipo y además no puede usar «200 vs 404» para saber si algo
+#    existe. Por eso el contexto se acota a los DOS prefijos de esta aplicación.
+#
+# 3. `login.php` SE EXCLUYE DEL ESCANEO ACTIVO, a propósito y con razón medida. Es el endpoint de
+#    autenticación del plugin y tiene throttle por usuario y por barrido de IP
+#    (`plugin/classes/local/login_guard.php`). Un escaneo activo dispara ese guarda, deja la IP
+#    del laboratorio bloqueada un rato y con ella caen la matriz de autorización y la medición de
+#    carga que vienen después — y contra el servidor podría bloquear a instructores REALES. Sus
+#    tres guardas (CSRF por Content-Type, gates post-autenticación y throttle) se prueban de forma
+#    controlada en `playwright/tests/zea-mecanismos.spec.ts`, que es donde un test los mira a los
+#    ojos. La ruta sigue en el contexto para el análisis PASIVO (cabeceras, cookies, TLS).
+env:
+  contexts:
+    - name: zea
+      urls:
+        - "${APP_INTERNAL_URL}/zea-api/"
+        - "${APP_INTERNAL_URL}/zea-dashboard/"
+      includePaths:
+        - "${APP_INTERNAL_URL}/zea-api/.*"
+        - "${APP_INTERNAL_URL}/zea-dashboard/.*"
+        - "${APP_INTERNAL_URL}/zajuna/blocks/zajuna_early_alert/.*"
+      excludePaths:
+        # El endpoint de login: ver la particularidad 3 de la cabecera.
+        - ".*/blocks/zajuna_early_alert/login\\.php.*"
+        # ENVÍO DE CORREO REAL. `internal/mailer/http.go` expone /api/v1/email/send, que escribe a
+        # un SMTP de verdad con destinatarios de verdad (aprendices). Un escaneo activo lo
+        # repetiría con cargas útiles: eso no es medir, es enviar correo basura en nombre del SENA.
+        # No aparece en el contrato OpenAPI, así que además nadie lo esperaría.
+        - ".*/api/v1/email/send.*"
+        # Moodle entero: es el núcleo compartido de la fábrica, no lo audita este perfil.
+        - "${APP_INTERNAL_URL}/zajuna/(?!blocks/zajuna_early_alert).*"
+  parameters:
+    failOnError: false      # el veredicto lo da `make gate`, no el código de salida de la herramienta
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  # La superficie real, declarada. `requestor` acepta ${VAR}, así que el mismo plan sirve para el
+  # despliegue local y para el servidor sin mantener dos listas de URL que acabarían divergiendo.
+  - type: requestor
+    parameters:
+      user: ""
+    requests:
+      # --- API Go: lo público según el propio contrato -------------------------------------
+      - url: "${APP_INTERNAL_URL}/zea-api/health"
+        method: GET
+      # /metrics: público por diseño (docs/api/openapi.json lo declara `security: []`). Detrás del
+      # proxy sale a internet — 200 y 15 KB en el servidor. Se pide para que quede en la evidencia.
+      - url: "${APP_INTERNAL_URL}/zea-api/metrics"
+        method: GET
+      # --- Las ocho rutas de reportes: deben responder 401 sin JWT --------------------------
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/login?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/activity-progress?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/activity-matrix?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/activity-detail?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/learner-activity?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/learner-resources?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/learning-outcomes?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/reports/rap-detail?courseid=1"
+        method: GET
+      # Salud del canal de correo: exige JWT (internal/mailer/http.go:24). Se comprueba que lo exige.
+      - url: "${APP_INTERNAL_URL}/zea-api/api/v1/email/health"
+        method: GET
+      # --- La ruta que el contrato OpenAPI declara para producción y NO existe --------------
+      # `docs/api/openapi.json` dice `/api-zea`; el nginx del repo publica `/zea-api/`. Se pide
+      # para dejar constancia de lo que recibe un cliente generado desde ese contrato.
+      - url: "${APP_INTERNAL_URL}/api-zea/health"
+        method: GET
+      # --- SPA y endpoints del plugin dentro de Moodle --------------------------------------
+      - url: "${APP_INTERNAL_URL}/zea-dashboard/"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/blocks/zajuna_early_alert/token.php?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/blocks/zajuna_early_alert/session.php"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/blocks/zajuna_early_alert/view_report.php?courseid=1"
+        method: GET
+      - url: "${APP_INTERNAL_URL}/zajuna/blocks/zajuna_early_alert/vue_report.php?courseid=1"
+        method: GET
+
+  # El spider corre igualmente, pero acotado: sirve para los estáticos del SPA (mapas de fuentes
+  # olvidados, ficheros de configuración horneados), no para descubrir la API.
+  - type: spider
+    parameters:
+      context: zea
+      url: "${APP_INTERNAL_URL}/zea-dashboard/"
+      maxDuration: 3
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  - type: activeScan
+    parameters:
+      context: zea
+      policy: "Default Policy"
+      maxRuleDurationInMins: 2
+      maxScanDurationInMins: 12
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.json
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/reports
+      reportFile: zap-report.html

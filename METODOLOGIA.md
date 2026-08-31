@@ -120,6 +120,31 @@ un resultado sorprenda, comprueba primero si el fallo es tuyo — del fixture, d
 comando — antes de atribuírselo al proyecto. Distinguir un fallo del entorno de uno del sistema
 auditado es parte del trabajo, no un preámbulo.
 
+## 4.bis Fundamentar el riesgo: de «severidad Alta» a prueba con marco
+
+Entre juzgar los hallazgos y emitir el veredicto hay un paso que el informe por sí solo no cubre:
+**probar que cada riesgo confirmado es tangible y anclarlo a marcos reconocidos.** Un equipo de
+desarrollo que recibe «severidad Alta» aprende poco, y una fábrica que aspira a certificarse
+(ISO/IEC 27001) necesita trazabilidad: por cada riesgo, un documento que demuestre *dónde vive, por
+qué medios se ejecuta y con qué evidencia*, mapeado a OWASP, MITRE (CWE/ATT&CK), STRIDE, CVSS y los
+controles del Anexo A de ISO 27001.
+
+`make riesgos TARGET=<proyecto>` verifica que cada hallazgo confirmado tiene su
+`targets/<t>/riesgos/<ID>.md` con esas secciones pobladas para ESE hallazgo. `make riesgos
+ANDAMIAR=1` crea los esqueletos. Es el mismo principio que los guiones: **el laboratorio se niega**
+a dar el paso por completo mientras un confirmado no tenga su fundamentación — una severidad sin
+prueba ni marco es una afirmación, no un hallazgo defendible.
+
+No es una PoC («corre estos comandos»). Es un documento **probatorio y FORMATIVO**: su doble
+destinatario es el desarrollador que debe entender la base del fallo para no repetirlo, y el auditor
+de certificación que necesita ver el control mapeado. La matriz consolidada
+(`reports/<t>/MATRIZ_MARCOS.md`) cruza todos los hallazgos contra todos los marcos en una tabla, y
+el informe enlaza cada ficha desde su hallazgo.
+
+Una honestidad que el paso preserva: cuando un marco NO aplica (un fallo de disponibilidad por error
+propio no tiene vector CVSS ni técnica ATT&CK; un riesgo de proceso no encaja en STRIDE), se DICE,
+en vez de forzar una casilla. Forzar el encaje enseñaría al equipo un mapeo falso.
+
 ## 5. El entregable
 
 `make informe TARGET=<proyecto>` produce

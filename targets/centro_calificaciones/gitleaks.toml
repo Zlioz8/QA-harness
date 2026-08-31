@@ -1,0 +1,66 @@
+# gitleaks — guion escrito para Centro de Calificaciones (3 repos: centro_de_actividades @ lmsActividad,
+# centro_de_resultados @ centro_resultados, centro_de_calificaciones_sincronizacion @ calificaciones)
+#
+# POR QUÉ ESTE ARCHIVO NO ES EL DE LA PLANTILLA
+# Aquí SÍ hay ficheros .env (a diferencia de #7, que era un plugin sin .env), y hay MÁS de una forma
+# de secreto porque el proyecto habla con cuatro backends: PostgreSQL Zajuna, PostgreSQL SOFIA, MongoDB
+# y el web service SOAP de SOFIA Plus (sync-oracle). Las formas se leyeron una a una del código y de
+# los .env.example, y sobre todo de la HISTORIA git — que es donde vive el secreto de verdad.
+#
+# LO QUE SE MIDIÓ ANTES DE ESCRIBIR ESTAS REGLAS (2026-08-25, sobre los tres árboles):
+#   - centro_de_resultados: un `.env` estuvo COMITEADO durante decenas de commits (hasta 8fb5464
+#     "Ignorar .env") con ZAJUNA_PASSWORD/SOFIA_PASSWORD = /76nF6px(&k)Ng_ para el usuario `postgres`
+#     (SUPERUSUARIO). Gitignoreado después, pero recuperable en la historia -> por eso ALLOW_SECRETS=0.
+#   - centro_de_actividades/queries/comandos_conexion.sql:18 -> OPTIONS (user 'postgres', password '12345')
+#     literal y VIGENTE en el árbol: la contraseña del USER MAPPING de postgres_fdw.
+#   - MONGO_HOST admite el formato mongodb://usuario:contraseña@host (documentado en los .env.example).
+#   - sync-oracle: API_SOFIA_PASSWORD (Basic Auth del SOAP) y ORACLE_PASSWORD.
+# La superficie es concreta: las reglas se anclan a ESAS formas, no a "cualquier variable con pass".
+
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# 1. Variables de entorno con secreto asignado — en .env COMITEADO o en su historia
+# ---------------------------------------------------------------------------
+# Cubre ZAJUNA_PASSWORD, SOFIA_PASSWORD, RECORDATORIO_PASSWORD, ORACLE_PASSWORD, API_SOFIA_PASSWORD.
+# Admite espacios alrededor del `=` (el .env real escribe `ZAJUNA_PASSWORD = /76...`). secretGroup=2
+# reporta el VALOR, no la firma. El allowlist de abajo descarta placeholders (host, port, name_bd...).
+[[rules]]
+id = "calif-env-db-password"
+description = "Contraseña de BD/servicio asignada en un fichero de entorno (Zajuna/SOFIA/Oracle/API)"
+# RE2 (Go) NO admite lookahead: para descartar lecturas de entorno ($password = $_ENV[...],
+# getenv(...)) el valor NO puede empezar por `$` (variable PHP) — se rechaza con una clase negada
+# en el primer carácter. Un secreto real que empiece por `$` es raro en .env y ninguno aquí lo hace.
+regex = '''(?i)\b([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN))\s*=\s*['"]?([^$'"\s#][^'"\s#]{3,})'''
+secretGroup = 2
+tags = ["calif", "env", "db-credential"]
+
+# 2. Contraseña embebida en SQL: USER MAPPING / OPTIONS de postgres_fdw (comandos_conexion.sql)
+#    `OPTIONS (user 'postgres', password '12345')`. La regla genérica no la ve: no hay `=`, es sintaxis SQL.
+[[rules]]
+id = "calif-fdw-usermapping-password"
+description = "Contraseña embebida en OPTIONS/USER MAPPING de postgres_fdw (SQL)"
+regex = '''(?i)password\s+'([^']{1,64})'\s*\)'''
+secretGroup = 1
+path = '''\.sql$'''
+tags = ["calif", "fdw", "hardcoded"]
+
+# 3. URI de MongoDB con credenciales embebidas: mongodb://usuario:contraseña@host
+[[rules]]
+id = "calif-mongodb-uri-creds"
+description = "URI de MongoDB con usuario:contraseña embebidos"
+regex = '''mongodb(?:\+srv)?://[^:@\s/]+:([^@\s/]{3,})@'''
+secretGroup = 1
+tags = ["calif", "mongodb", "connection-string"]
+
+# ---------------------------------------------------------------------------
+#  Allowlist GLOBAL — placeholders de .env.example y documentación, no secretos
+#  (gitleaks: allowlist global es [allowlist] (map), no [[rules.allowlist]] (slice))
+# ---------------------------------------------------------------------------
+[allowlist]
+description = "placeholders de los .env.example y de los manuales"
+regexes = [
+  '''(?i)=\s*(host|port|user|name_bd|password|pass|<pendiente>|xxx+|your_?\w*|tu_?\w*|changeme|cambia\w*)\s*$''',
+  '''AQUI--DEBE--IR''',
+]

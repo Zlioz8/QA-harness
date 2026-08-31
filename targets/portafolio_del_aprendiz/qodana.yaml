@@ -1,0 +1,39 @@
+# Qodana (JetBrains) — guion escrito para local_portafolio @ feature/v2 9674bda.
+#
+# QODANA NO ES «NO APLICA» EN ESTE PROYECTO — es, previsiblemente, NO DISPONIBLE, y la
+# diferencia importa. Aplica: son 44 ficheros PHP y 2 JS, justo lo que estas inspecciones leen.
+# Lo que falta es la IMAGEN: el linter de PHP de JetBrains es de pago y este laboratorio no tiene
+# licencia (mismo desenlace en adi, reportes_de_cursos y encuestas). Este guion existe para que,
+# el día que haya licencia, mida ESTE proyecto y no el ejemplo de la plantilla — y para que el
+# informe pueda decir «no disponible por licencia», que es una afirmación, en vez de callarse,
+# que no lo es.
+#
+# QUÉ CAMBIA RESPECTO A LA PLANTILLA. La plantilla excluye `vendor`, `node_modules`, `dist`,
+# `__pycache__` y `.venv`: el árbol de una aplicación con gestor de dependencias. Aquí NO EXISTE
+# NINGUNO DE ESOS DIRECTORIOS — este plugin no tiene manifiesto ni paso de build (DEPLOY.md §7 y
+# §10), así que esas cinco líneas no excluyen nada y no describen este proyecto. Lo que sí hay
+# que excluir es otra cosa, y hay que decir por qué.
+version: "1.0"
+
+profile:
+  name: qodana.recommended
+
+exclude:
+  - name: All
+    paths:
+      # El ÚNICO código de terceros del repositorio: el bundle de FontAwesome, minificado.
+      # Inspeccionarlo produce cientos de avisos sobre código que este equipo no escribió ni
+      # puede arreglar, y que enterrarían los suyos.
+      #
+      # Ojo con el matiz: excluirlo de las INSPECCIONES DE CALIDAD es correcto; que ese bundle
+      # esté vendorizado SIN VERSIÓN DECLARADA (feature/migration sí traía `thirdpartylibs.xml`,
+      # v2 lo perdió) es un hallazgo REAL, y lo mide la dimensión de dependencias, no esta.
+      - pix/icons/fontawesome
+
+      # Scripts de siembra de un solo uso, que el propio autor marca como desechables
+      # («No es parte del plugin instalado - borrar tras usar», cli/seed_rap.php:4). No son
+      # código desplegado: sus defectos de estilo no son deuda del producto.
+      #
+      # Que sigan versionados CON DATOS PERSONALES REALES dentro sí es un hallazgo — lo levanta
+      # la regla `portafolio-pii-en-seeds` de gitleaks.toml, con su evidencia propia.
+      - cli

@@ -1,0 +1,26 @@
+[
+  {
+    "path": "/api/reportes",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "reportes.py:219 list_reportes exige CurrentUser: cualquier usuario autenticado ve el catálogo. Ambos roles deben poder; el anónimo NO (401, verificado por curl). El motor prueba A y B, no el anónimo — la denegación anónima se cubre en la spec de mecanismos."
+  },
+  {
+    "path": "/api/solicitudes",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "solicitudes.py:48 filtra por usuario_email == current_user: cada quien ve SOLO lo suyo. Ambos roles autenticados alcanzan el endpoint (200 con su propia lista). Que B NO vea lo de A es propiedad, no ruta: va en la spec de mecanismos, que necesita una solicitud real de A."
+  },
+  {
+    "path": "/api/programados",
+    "method": "GET",
+    "allow": ["A", "B"],
+    "note": "programados.py:61 filtra por usuario_email: mismo patrón de propiedad que solicitudes."
+  },
+  {
+    "path": "/api/admin/users",
+    "method": "GET",
+    "allow": ["A"],
+    "note": "admin.py:37 exige CurrentAdmin (siteadmin o rol manager de sistema, api/moodle_auth.py:check_user_access). SOLO el rol alto debería alcanzarlo. HALLAZGO ESPERADO (C5): api/main.py NUNCA hace include_router(admin), así que esta ruta cae en el catch-all `@app.get('/{path:path}')` y devuelve el SPA con 200 para CUALQUIERA — ni 401 ni datos de admin. La regla está encodeada como la política PRETENDE (solo A); si la corrida da 200 para B, la contradicción ES el hallazgo, no el test."
+  }
+]

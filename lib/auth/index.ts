@@ -70,6 +70,40 @@ async function cookie(ctx: APIRequestContext, name: string): Promise<string> {
   return decodeURIComponent(state.cookies.find((c) => c.name === name)?.value ?? '');
 }
 
+// ---- Encuestas: login directo por USERNAME -> token Bearer -----------------
+//
+// El modo de auditoría LOCAL de encuestas, sin SSO. `POST /api/login` con {username,password}
+// (AuthController::login valida `username`, no `email`) devuelve `access_token`, que la API
+// acepta como Bearer. Se usa contra el despliegue de validación de esta máquina, con cuentas de
+// la APLICACIÓN creadas por el laboratorio (rol en la columna `users.rol`). La matriz que sale
+// de aquí es NO AUTORITATIVA —los roles los elegimos nosotros— pero ejecuta la dimensión de
+// verdad; la autoritativa exige las cuentas reales por SSO (adaptador `encuestas-sso`).
+const encuestasLogin: AuthAdapter = {
+  name: 'encuestas-login',
+  async loginAs(role) {
+    const res = await (await newCtx()).post(u('/api/login'), {
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      data: { username: CREDS[role].user, password: CREDS[role].pass },
+    });
+    if (res.status() !== 200)
+      throw new Error(`encuestas-login: /api/login ${res.status()} para el rol ${role}`);
+    const token = (await res.json()).access_token;
+    if (!token) throw new Error(`encuestas-login: respuesta 200 sin access_token para ${role}`);
+    return pwRequest.newContext({
+      baseURL: BASE,
+      extraHTTPHeaders: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        ...(ORIGIN ? { Origin: ORIGIN } : {}),
+      },
+      ignoreHTTPSErrors: true,
+    });
+  },
+  async writeHeaders() {
+    return {}; // el Bearer ya viaja en el contexto
+  },
+};
+
 // ---- Laravel Sanctum SPA (cookie session + XSRF header) --------------------
 const sanctum: AuthAdapter = {
   name: 'sanctum',
@@ -109,6 +143,97 @@ const moodleSession: AuthAdapter = {
   },
   async writeHeaders(ctx) {
     // sesskey travels as a parameter, not a header; specs read it via sesskeyOf().
+    return {};
+  },
+};
+
+// ---- Moodle + plugin propio que emite JWT en dos saltos --------------------
+//
+// El caso de ZAJUNA Early Alert (reportes_de_cursos), y el de cualquier plugin de Moodle que
+// ponga delante un servicio propio: Moodle NO es el destino, es el emisor de credenciales.
+//
+//   1. POST <moodle>/blocks/<plugin>/login.php  {username,password} en JSON
+//      -> JWT de IDENTIDAD (RS256, ~1 h) + los cursos donde el usuario puede ver reportes.
+//      El Content-Type JSON es obligatorio: es el guarda CSRF del propio endpoint (un <form>
+//      cross-origin no puede ponerlo). Mandarlo form-encoded da 400, que se lee como
+//      «credenciales malas» cuando lo que falla es la forma de pedirlo.
+//   2. GET <moodle>/blocks/<plugin>/token.php?courseid=N  con ese Bearer
+//      -> JWT DE CURSO (600 s), atado a UN curso. 403 si el usuario no tiene la capability
+//      en ese curso: aquí es donde vive el control de acceso, y por eso el paso 2 no se puede
+//      saltar ni cachear entre cursos.
+//
+// Configuración (target.env), nada de esto es código:
+//   ZEA_MOODLE_BASE   prefijo de ruta donde vive Moodle en ese origen ('' o '/zajuna')
+//   ZEA_PLUGIN_PATH   ruta del plugin (por defecto /blocks/zajuna_early_alert)
+//   ZEA_COURSE_A/_B   el curso con el que cada rol pide su token
+//
+// `loginAs` devuelve un contexto con el JWT DE CURSO, que es el que la API acepta. Un fallo en
+// el paso 2 se lanza con su status: un 403 aquí es un dato de la matriz de autorización, no un
+// error del laboratorio, y la diferencia tiene que verse en el mensaje.
+const zeaStandalone: AuthAdapter = {
+  name: 'zea-standalone',
+  async loginAs(role) {
+    const mb = process.env.ZEA_MOODLE_BASE || '';
+    const plugin = process.env.ZEA_PLUGIN_PATH || '/blocks/zajuna_early_alert';
+    const curso = (role === 'B' ? process.env.ZEA_COURSE_B : process.env.ZEA_COURSE_A) || '';
+    if (!curso) throw new Error(`zea-standalone: falta ZEA_COURSE_${role} en el perfil`);
+    const tmp = await newCtx();
+    const r1 = await tmp.post(u(`${mb}${plugin}/login.php`), {
+      data: { username: CREDS[role].user, password: CREDS[role].pass },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    });
+    if (r1.status() !== 200)
+      throw new Error(`zea login.php falló para el rol ${role}: ${r1.status()}`);
+    const ident = (await r1.json()).token;
+    if (!ident) throw new Error('zea login.php: respuesta 200 sin campo token');
+    const r2 = await tmp.get(u(`${mb}${plugin}/token.php?courseid=${encodeURIComponent(curso)}`), {
+      headers: { Authorization: `Bearer ${ident}`, Accept: 'application/json' },
+    });
+    // UN 403 AQUÍ NO ES UN FALLO DEL LABORATORIO: ES EL RESULTADO.
+    //
+    // `token.php` deniega con 403 a quien no tiene `viewreports` en ese curso — que es
+    // exactamente lo que se espera del rol B (un aprendiz: `db/access.php` concede la capability
+    // solo a teacher, editingteacher y manager). Si esto lanzara, la matriz de autorización
+    // moriría al construir la sesión y la dimensión entera se reportaría como error del lab en
+    // vez de como lo que es: la denegación funcionando.
+    //
+    // Así que un 403 devuelve un contexto SIN Authorization —las credenciales que ese rol tiene
+    // de verdad—, y se marca con una cabecera propia para que quien lea la traza no confunda
+    // «no pudo obtener token» con «se olvidó de autenticarse». Cualquier otro fallo (login roto,
+    // 5xx, red) sí lanza: eso sería un problema del entorno, y callarlo haría pasar por
+    // «denegado» lo que en realidad no se midió.
+    if (r2.status() === 403) {
+      console.warn(
+        `[zea-standalone] token.php 403 para el rol ${role} en el curso ${curso}: ` +
+          'esa cuenta NO tiene block/zajuna_early_alert:viewreports ahí. ' +
+          'Es un dato de la matriz, no un error — sigue sin cabecera Authorization.',
+      );
+      return pwRequest.newContext({
+        baseURL: BASE,
+        extraHTTPHeaders: {
+          Accept: 'application/json',
+          'X-Zea-Token-Denied': '403',
+          ...(ORIGIN ? { Origin: ORIGIN } : {}),
+        },
+        ignoreHTTPSErrors: true,
+      });
+    }
+    if (r2.status() !== 200)
+      throw new Error(`zea token.php ${r2.status()} para el rol ${role} en el curso ${curso}`);
+    const curso_jwt = (await r2.json()).token;
+    if (!curso_jwt) throw new Error('zea token.php: respuesta 200 sin campo token');
+    return pwRequest.newContext({
+      baseURL: BASE,
+      extraHTTPHeaders: {
+        Authorization: `Bearer ${curso_jwt}`,
+        Accept: 'application/json',
+        ...(ORIGIN ? { Origin: ORIGIN } : {}),
+      },
+      ignoreHTTPSErrors: true,
+    });
+  },
+  async writeHeaders() {
+    // La API de reportes es de solo lectura (todo GET); no hay escritura que cabecear.
     return {};
   },
 };
@@ -266,11 +391,103 @@ const none: AuthAdapter = {
   },
 };
 
+// ---- Encuestas: Moodle-session -> pase HMAC del plugin -> token Sanctum -----
+//
+// El SSO de `encuestas`, y el patrón de cualquier app propia que entra por un plugin de Moodle
+// que acuña un pase corto. Moodle NO es el destino: es el emisor. Tres saltos, cada uno leído
+// del código del proyecto (AuthController::zajunaAutologin, ZajunaSsoService::validarPase,
+// plugin-encuestas-zajuna/plugin/redirect.php):
+//
+//   1. Login por FORMULARIO de Moodle (igual que moodle-session): cookie MoodleSession.
+//   2. GET <moodle>/local/encuestas/redirect.php  con esa sesión
+//      -> el plugin firma un pase (JWT HS256 con el secreto compartido) y redirige a
+//         <api>/api/auth/zajuna?token=<pase>.
+//   3. Ese endpoint valida el pase y REDIRIGE a la SPA con ?token=<access_token Sanctum>.
+//      Ese access_token es el Bearer que la API acepta.
+//
+// EL LABORATORIO NO FABRICA EL PASE. Firmarlo nosotros exigiría el secreto compartido (que NO
+// está en el repo, y bien) y mediría nuestra capacidad de firmar, no el control de acceso del
+// sistema. Por eso el pase se OBTIENE recorriendo el flujo real con una sesión de Moodle de una
+// cuenta REAL — es la única forma de que la credencial resultante signifique algo.
+//
+// CUÁNDO NO PUEDE CORRER, y hay que declararlo en vez de fingir: si el login web de Moodle de ese
+// entorno rebota a un IdP externo (zajunavideo5 manda `login/index.php` a caplms por su
+// `alternateloginurl`), el paso 1 no completa. Entonces esto LANZA con un mensaje explícito y la
+// dimensión de autorización se reporta NO DISPONIBLE por bloqueo de entorno — que no es «sin
+// hallazgos». La superficie NO autenticada (401/403 sin sesión) sí se mide aparte y es autoritativa.
+//
+// Configuración (target.env / .local), nada de esto es código:
+//   MOODLE_BASE_URL   dónde vive Moodle (p.ej. https://host/zajuna)
+//   ENC_PLUGIN_PATH   ruta del plugin (por defecto /local/encuestas/redirect.php)
+//   ENC_API_BASE      base de la API de Encuestas (BASE_URL por defecto)
+const encuestasSso: AuthAdapter = {
+  name: 'encuestas-sso',
+  async loginAs(role) {
+    const moodle = (process.env.MOODLE_BASE_URL || process.env.MOODLE_TEST_URL || '').replace(/\/$/, '');
+    if (!moodle) throw new Error('encuestas-sso: falta MOODLE_BASE_URL en el perfil');
+    const redirectPath = process.env.ENC_PLUGIN_PATH || '/local/encuestas/redirect.php';
+
+    // Paso 1 — sesión de Moodle por formulario.
+    const ctx = await pwRequest.newContext({ baseURL: moodle, ignoreHTTPSErrors: true });
+    const form = await (await ctx.get(`${moodle}/login/index.php`)).text();
+    // Si el login rebotó a un IdP externo, no hay formulario que rellenar: fallo de ENTORNO.
+    if (!/name="logintoken"/.test(form)) {
+      throw new Error(
+        `encuestas-sso: el login web de Moodle en ${moodle} no sirve el formulario ` +
+          '(rebota a un IdP externo, p.ej. caplms). El SSO no se puede completar en este ' +
+          'entorno: la matriz autenticada queda NO DISPONIBLE por bloqueo, no «sin hallazgos».',
+      );
+    }
+    const token = /name="logintoken"\s+value="([^"]+)"/.exec(form)?.[1] ?? '';
+    const login = await ctx.post(`${moodle}/login/index.php`, {
+      form: { username: CREDS[role].user, password: CREDS[role].pass, logintoken: token },
+      maxRedirects: 5,
+    });
+    const loginBody = await login.text();
+    if (loginBody.includes('loginerrors') || loginBody.includes('name="logintoken"'))
+      throw new Error(`encuestas-sso: login de Moodle falló para el rol ${role}`);
+
+    // Paso 2 y 3 — el plugin acuña el pase y el endpoint lo canjea. Se sigue la cadena de
+    // redirects a mano para leer el access_token del último Location sin ejecutar la SPA.
+    let url = `${moodle}${redirectPath}`;
+    let access = '';
+    for (let salto = 0; salto < 6 && !access; salto++) {
+      const r = await ctx.get(url, { maxRedirects: 0 });
+      const loc = r.headers()['location'] || '';
+      if (!loc) break;
+      const m = /[?&]token=([^&]+)/.exec(loc);
+      if (m) { access = decodeURIComponent(m[1]); break; }
+      const err = /[?&]error=([^&]+)/.exec(loc);
+      if (err) throw new Error(`encuestas-sso: el SSO rechazó al rol ${role}: ${decodeURIComponent(err[1])}`);
+      url = /^https?:\/\//.test(loc) ? loc : `${moodle}${loc}`;
+    }
+    if (!access) throw new Error(`encuestas-sso: no se obtuvo access_token para el rol ${role} tras el SSO`);
+
+    // El Bearer Sanctum contra la API de Encuestas.
+    return pwRequest.newContext({
+      baseURL: process.env.ENC_API_BASE || BASE,
+      extraHTTPHeaders: {
+        Authorization: `Bearer ${access}`,
+        Accept: 'application/json',
+        ...(ORIGIN ? { Origin: ORIGIN } : {}),
+      },
+      ignoreHTTPSErrors: true,
+    });
+  },
+  async writeHeaders() {
+    // La matriz de autorización es de solo lectura (GET); no hay escritura que cabecear.
+    return {};
+  },
+};
+
 const ADAPTERS: Record<string, AuthAdapter> = {
   sanctum,
   'moodle-session': moodleSession,
+  'encuestas-sso': encuestasSso,
+  'encuestas-login': encuestasLogin,
   'jwt-bearer': jwtBearer,
   'php-form': phpForm,
+  'zea-standalone': zeaStandalone,
   zajuna,
   basic,
   none,

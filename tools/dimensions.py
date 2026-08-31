@@ -65,6 +65,14 @@ class Dimension:
     measured: bool = False
     needs: str = "source"
     runner: str = "local"
+    per_repo: bool = False  # ¿se ejecuta una vez POR REPOSITORIO descubierto bajo SRC_PATH?
+                            # El contrato del perfil dice que en un proyecto de VARIOS
+                            # repositorios SRC_PATH apunta al DIRECTORIO PADRE, y ese padre es
+                            # una carpeta de trabajo: trae también manuales, capturas y logs de
+                            # sesiones de otros proyectos. Montarlo entero significaba
+                            # analizarlos y reportarlos como cobertura de este. Con esto, la
+                            # entrada de estas dimensiones son los repositorios y solo ellos.
+                            # Ver tools/lib-repos.sh y tools/run-dimension.sh.
 
     def path(self, reports_dir: str) -> str:
         return os.path.join(reports_dir, self.artifact)

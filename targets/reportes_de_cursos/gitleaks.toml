@@ -1,0 +1,146 @@
+# gitleaks — reglas escritas PARA reportes_de_cursos (ZAJUNA Early Alert), no el ejemplo genérico.
+#
+# POR QUÉ NO SIRVE LA PLANTILLA. Su `env-assigned-secret` marca
+# `[A-Z0-9_]*(PASSWORD|SECRET|TOKEN|APIKEY)=\S{4,}` sobre cualquier archivo. Este proyecto son
+# 220 archivos PHP de un plugin de Moodle, 171 de Go y 345 de TypeScript, y ese código MANEJA
+# credenciales constantemente: `$CFG->dbpass`, el `DB_PASSWORD` que lee
+# `zea-api/internal/config/config.go`, el `password` de los tipos del login del SPA y una batería
+# de tests que fabrica contraseñas de mentira. Con la regla genérica, cada una de esas líneas sale
+# como fuga y entierra las de verdad.
+#
+# LO QUE DE VERDAD HAY QUE BUSCAR AQUÍ, leído del repositorio (`.env.example`,
+# `zea-api/internal/config/config.go`, `plugin/classes/local/jwt_key.php`, `zea-api/deploy_rs256.sh`
+# y `scripts/docker-up.sh`), no de un catálogo:
+#
+#   1. La clave PRIVADA RSA con la que `plugin/token.php` FIRMA los JWT. Quien la tenga emite
+#      tokens de curso válidos para cualquier usuario y cualquier curso: es la credencial que
+#      sostiene todo el control de acceso de la API Go.
+#   2. `DB_PASSWORD` — la contraseña de la base de Moodle. La API la lee de `.env`, y `.env` se
+#      genera a partir del `config.php` de Moodle: un `.env` versionado es la contraseña de la
+#      base de producción metida en la historia de git.
+#   3. `SMTP_PASSWORD` — el canal de correo saliente escribe a un servidor real.
+#   4. Sesión de Moodle de una persona, pegada para desarrollo: `VITE_MOODLE_COOKIE`
+#      (MoodleSession) y `VITE_SESSKEY`. `.env.example` dice literalmente «pegar desde DevTools».
+#   5. `wstoken` de servicios web de Moodle (32 hex) — un token permanente de API.
+#
+# La búsqueda es sobre la HISTORIA, que es donde un secreto se queda aunque se borre del árbol.
+
+[extend]
+useDefault = true   # llaves privadas, AWS, JWT genéricos, tokens de proveedores conocidos
+
+# --- 1. Clave privada RSA de firma de los JWT ------------------------------------------------
+# El default de gitleaks ya trae `private-key`; ésta es la del CONTEXTO de este proyecto: el
+# ajuste de Moodle `report_jwt_private_key` guarda el PEM EN LA BASE DE DATOS (el propio plugin lo
+# marca obsoleto y avisa de que Moodle registra todo cambio de configuración), así que puede
+# aparecer en un volcado SQL, en un script de aprovisionamiento o en documentación.
+[[rules]]
+id = "zea-jwt-private-key-setting"
+description = "Clave privada RS256 de firma de tokens (ajuste report_jwt_private_key o PEM embebido)"
+regex = '''(?i)report_jwt_private_key[a-z_]*[ \t]*[=:>'"\]]{1,4}[ \t]*['"]?-----BEGIN[ \t]+(RSA[ \t]+)?PRIVATE[ \t]+KEY-----'''
+tags = ["zea", "jwt", "rs256"]
+
+# La misma clave pegada de cualquier otra forma en un archivo que no sea un `.pem`. Se excluyen los
+# árboles de pruebas: los tests de Go y de PHPUnit generan pares RSA al vuelo, y esos no son fugas.
+[[rules]]
+id = "zea-rsa-private-key-inline"
+description = "Bloque de clave privada RSA dentro de un archivo que no es un .pem"
+regex = '''-----BEGIN[ \t]+(RSA[ \t]+)?PRIVATE[ \t]+KEY-----[\s\S]{64,}?-----END'''
+paths = ['''\.(env|sh|md|php|go|ts|js|ya?ml|json|sql)$''']
+tags = ["zea", "jwt", "rs256"]
+[rules.allowlist]
+paths = ['''(^|/)(plugin/tests|zea-api/internal/auth|vue-app/tests)/''']
+
+# --- 2. Contraseña de la base de datos de Moodle ---------------------------------------------
+# `DB_PASSWORD` no tiene valor por defecto a propósito (`config.go:139`: «refusing to start and
+# try a default credential»), así que todo valor no vacío que aparezca lo puso alguien a mano.
+# `[ \t]` y no `\s`: en RE2 `\s` incluye el salto de línea, y una variable vacía se tragaría la
+# línea siguiente entera.
+[[rules]]
+id = "zea-db-password"
+description = "Contraseña de la base de datos de Moodle asignada en un archivo"
+regex = '''(?i)\b(DB_PASSWORD|POSTGRES_PASSWORD|PGPASSWORD)[ \t]*=[ \t]*[^\s#<$"'`]{4,}'''
+tags = ["zea", "db"]
+[rules.allowlist]
+# `moodlepass` es el marcador de `.env.example`; el resto son centinelas y sustituciones de shell.
+stopwords = ["moodlepass", "cambiame", "changeme", "change-me", "example", "tu-password"]
+regexes = ['''(<[^>]*>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\$\([^)]*\))''']
+
+# `$CFG->dbpass` de un `config.php` de Moodle: nunca debe estar en este repositorio, y si aparece
+# es la contraseña de la instalación entera.
+[[rules]]
+id = "zea-moodle-config-dbpass"
+description = "\\$CFG->dbpass de un config.php de Moodle versionado"
+regex = '''\$CFG\s*->\s*dbpass\s*=\s*['"][^'"]{3,}['"]'''
+tags = ["zea", "moodle", "db"]
+[rules.allowlist]
+stopwords = ["cambiame", "changeme", "password", "moodlepass"]
+
+# --- 3. Credenciales del correo saliente ------------------------------------------------------
+# El canal de correo del plugin escribe a destinatarios reales (aprendices e instructores).
+# `scripts/apply-smtp.sh` provisiona estos valores a Moodle: dejarlos en un `.env` versionado o en
+# el propio script es entregar una cuenta de correo institucional.
+[[rules]]
+id = "zea-smtp-password"
+description = "Contraseña del SMTP saliente"
+regex = '''(?i)\b(SMTP_PASSWORD|SMTP_PASS|MAIL_PASSWORD)[ \t]*=[ \t]*[^\s#<$"'`]{4,}'''
+tags = ["zea", "smtp"]
+[rules.allowlist]
+stopwords = ["cambiame", "changeme", "example", "tu-password"]
+regexes = ['''(<[^>]*>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)''']
+
+# --- 4. Sesión de Moodle de una persona real, pegada para desarrollo --------------------------
+# `.env.example` documenta `VITE_MOODLE_COOKIE` como «pegar desde DevTools» y `VITE_SESSKEY` como
+# «de cualquier página logueada». Las dos juntas son una sesión secuestrable mientras dure; en la
+# historia de git quedan para siempre, y además dicen de quién era.
+[[rules]]
+id = "zea-moodle-session-pegada"
+description = "Cookie MoodleSession o sesskey de una sesión real pegada en la configuración"
+regex = '''(?i)\b(VITE_MOODLE_COOKIE|VITE_SESSKEY|MoodleSession)[ \t]*[=:][ \t]*['"]?[A-Za-z0-9]{10,}'''
+tags = ["zea", "moodle", "sesion"]
+[rules.allowlist]
+regexes = ['''(<[^>]*>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)''']
+
+# --- 5. Token de servicio web de Moodle -------------------------------------------------------
+# 32 hexadecimales. Es una credencial PERMANENTE: no caduca, y da acceso a las funciones del
+# servicio al que está atada. Se acota a asignaciones con nombre para no marcar cualquier md5 del
+# repositorio (los hay: sumas de comprobación y claves de caché).
+[[rules]]
+id = "zea-moodle-wstoken"
+description = "wstoken de servicio web de Moodle (credencial permanente)"
+regex = '''(?i)\b(wstoken|ws_token|moodle_token)[ \t]*[=:][ \t]*['"]?[a-f0-9]{32}\b'''
+tags = ["zea", "moodle", "api"]
+
+# --- 6. Credenciales de las pruebas E2E contra un Moodle real ---------------------------------
+# `E2E_MOODLE_USERNAME/PASSWORD` alimentan `vue-app/tests/e2e-real/auth.setup.ts`, que hace login
+# REAL. `.env.example` avisa: «entorno dev únicamente — nunca apuntar esto a producción». Si un
+# valor distinto del marcador llega a la historia, es una cuenta real de Moodle.
+[[rules]]
+id = "zea-e2e-credenciales"
+description = "Credenciales de un usuario real de Moodle para las pruebas E2E"
+regex = '''(?i)\bE2E_MOODLE_PASSWORD[ \t]*=[ \t]*[^\s#<$"'`]{4,}'''
+tags = ["zea", "e2e"]
+[rules.allowlist]
+stopwords = ["changeme", "cambiame", "admin", "password"]
+
+# --- Allowlist global -------------------------------------------------------------------------
+#
+# NO se excluye `.env.example`: es la plantilla y sus valores son marcadores, pero cada `stopword`
+# de arriba ya los tapa uno a uno. Excluirlo entero sería no enterarse el día que alguien pegue un
+# valor real «solo para probar», que es exactamente como llegan estos secretos.
+[allowlist]
+description = "Ruido conocido de ESTE repositorio, comprobado archivo a archivo"
+paths = [
+  # Artefactos compilados: el bundle de widgets se genera desde vue-app/src, no es código fuente.
+  '''(^|/)plugin/amd/build/''',
+  '''(^|/)plugin/js/''',
+  # Catálogo público del SENA (centros y regionales): un volcado de INSERT con nombres, sin
+  # credenciales. Comprobado antes de excluirlo.
+  '''(^|/)docs/data/.*\.sql$''',
+  # Formatos ofimáticos del sistema de calidad: binarios que se leerían como ruido base64.
+  '''\.(docx|xlsx|xlsb|pdf)$''',
+]
+regexes = [
+  # Las claves PÚBLICAS no son secretos, y `JWT_PUBLIC_KEY` aparece por toda la documentación de
+  # despliegue precisamente porque hay que ponerla en el `.env`.
+  '''-----BEGIN[ \t]+PUBLIC[ \t]+KEY-----''',
+]
