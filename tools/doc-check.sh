@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ¿La documentación sigue diciendo la verdad sobre lo que hace el laboratorio?
 #
-# La tabla de dimensiones de README.md y MANUAL_USO_QA.md era la SÉPTIMA copia de la lista que
+# La tabla de dimensiones de README.md y docs/MANUAL_USO_QA.md era la SÉPTIMA copia de la lista que
 # vivía en lib/dimensions.yml. Y estaba desactualizada exactamente igual que las otras seis:
 # anunciaba `trufflehog.txt` como artefacto cuando el gate lee `trufflehog.sarif`, y no mencionaba
 # la dimensión del artefacto móvil ni la del dispositivo.
@@ -14,7 +14,7 @@ set -uo pipefail
 
 BEG="<!-- dimensiones:inicio -->"
 END="<!-- dimensiones:fin -->"
-DOCS=(README.md MANUAL_USO_QA.md)
+DOCS=(README.md docs/MANUAL_USO_QA.md)
 FAIL=0
 
 ok()  { printf '  \033[32mok\033[0m    %s\n' "$1"; }

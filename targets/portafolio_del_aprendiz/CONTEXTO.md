@@ -30,7 +30,7 @@
 ## Lo intentado que NO funcionó
 
 <Vale tanto como lo que sí: evita repetirlo. Si el fallo fue del laboratorio, va también a
-BITACORA_LABORATORIO.md; aquí queda el rastro para la próxima sesión.>
+docs/BITACORA_LABORATORIO.md; aquí queda el rastro para la próxima sesión.>
 
 ## Lo que quedó abierto
 

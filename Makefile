@@ -35,11 +35,12 @@ guard:
 	@# there first decides the owner, so we get there first.
 	@mkdir -p $(REPORTS) $(REPORTS)/trivy $(REPORTS)/semgrep $(REPORTS)/sbom $(REPORTS)/sonar \
 	          $(REPORTS)/qodana $(REPORTS)/zap $(REPORTS)/k6 $(REPORTS)/playwright $(REPORTS)/build \
-	          $(REPORTS)/api $(REPORTS)/mobile $(REPORTS)/device
+	          $(REPORTS)/api $(REPORTS)/mobile $(REPORTS)/device $(REPORTS)/amenazas $(REPORTS)/aaa
 
 .PHONY: budget help list new siguiente brief guiones detect ingest-deploy doctor guard require-live require-auth clone up down purge status gate riesgos dashboard informe run-manifest doc-check ui ui-stop ui-logs \
         sonar qodana semgrep secrets deps config-scan image-scan sbom mobile-scan static \
-        build dast perf perf-jmeter e2e device-e2e live all api-lint api-fuzz mcp-journey require-mcp
+        build dast perf perf-jmeter e2e device-e2e live all api-lint api-fuzz mcp-journey require-mcp \
+        amenazas aaa
 
 help:             ##[admin] show this list, grouped by what each goal needs
 	@echo ""
@@ -260,6 +261,20 @@ api-fuzz: guard require-live   ##[live] Schemathesis: does the API obey its own 
 	    || { echo "api-fuzz: no schemathesis.xml — la dimension NO se ejecuto"; exit 1; }; \
 	fi
 
+amenazas: guard   ##[code] modelo de amenazas (Threagile): riesgos por letra STRIDE desde amenazas/threagile.yaml
+	@# El modelo lo escribe una persona; Threagile lo evalúa con sus reglas, cada una con su letra
+	@# STRIDE. Sin modelo no hay amenazas que evaluar: NO DISPONIBLE, que no es un aprobado. El
+	@# risks.json anterior se borra antes de correr: Threagile muere con panic ante un modelo mal
+	@# formado y dejaría el resultado viejo como si fuera de hoy. LAB_UID/LAB_GID: la imagen corre
+	@# como uid 1000 y la salida debe quedar del usuario del host, no de un 1000 ajeno.
+	@test -f targets/$(TARGET)/amenazas/threagile.yaml \
+	  || { echo "amenazas: no hay targets/$(TARGET)/amenazas/threagile.yaml — NO DISPONIBLE (copia targets/_template/amenazas/threagile.yaml y escríbelo)"; exit 2; }
+	@rm -f $(REPORTS)/amenazas/risks.json $(REPORTS)/amenazas/threagile.sarif
+	@LAB_UID=$$(id -u) LAB_GID=$$(id -g) tools/run-dimension.sh "$(TARGET)" amenazas || true
+	@test -s $(REPORTS)/amenazas/risks.json \
+	  || { echo "amenazas: Threagile no dejó risks.json — la dimensión NO se ejecutó (el error está arriba)"; exit 1; }
+	@tools/threagile-sarif.py $(REPORTS)/amenazas targets/$(TARGET)/amenazas/threagile.yaml
+
 device-e2e: guard  ##[live] the app on a real device, journey by journey (adb, host tooling)
 	@# The one dimension that is not hermetic: the phone is attached to this machine. Everything
 	@# else measures a server; this measures what the user's session actually does over time —
@@ -283,6 +298,23 @@ e2e: guard require-live require-auth  ##[live] Playwright functional / authz flo
 	@# comprueban ANTES — sin eso, dos credenciales malas producian 30 specs en rojo que se leian
 	@# como 30 fallos de autorizacion.
 	@tools/run-dimension.sh "$(TARGET)" playwright
+
+aaa: guard require-live require-auth ##[live] AAA en vivo: sondas de autenticación + matriz de autorización + oráculo de auditoría -> un SARIF por pilar
+	@# Tres pilares, un goal. Es la MISMA suite de Playwright que `e2e` (lib/specs/authn.spec.ts
+	@# lee aaa/authn.json; authz-matrix.spec.ts lee la matriz), más el oráculo SQL de solo lectura
+	@# (tools/aaa-oracle.sh sobre aaa/acct.json) y la conversión a un SARIF por pilar
+	@# (tools/aaa-sarif.py). Sustituye a `make e2e` cuando el perfil trae guiones AAA. Sin
+	@# AAA_DB_URL en target.env.local la auditoría sale «no-disponible», que el gate imprime como
+	@# skip y NUNCA como pass. AAA_DESTRUCTIVO=1 (entorno o target.env) habilita las sondas que
+	@# ensucian el sistema (agotar el limitador de login).
+	@test -f targets/$(TARGET)/aaa/authn.json -o -f targets/$(TARGET)/playwright/authz-matrix.json -o -f targets/$(TARGET)/aaa/acct.json \
+	  || { echo "aaa: ningún guion AAA en targets/$(TARGET)/ (aaa/authn.json, playwright/authz-matrix.json, aaa/acct.json) — NO DISPONIBLE"; exit 2; }
+	@rm -f $(REPORTS)/playwright/aaa-acciones.json $(REPORTS)/aaa/authn.sarif $(REPORTS)/aaa/authz.sarif $(REPORTS)/aaa/acct.sarif
+	@tools/run-dimension.sh "$(TARGET)" playwright || true
+	@test -s $(REPORTS)/playwright/results.json || { echo "aaa: Playwright no dejó results.json — la suite no corrió"; exit 1; }
+	@tools/aaa-oracle.sh "$(TARGET)"
+	@tools/aaa-sarif.py "$(TARGET)"
+	@for p in authn authz acct; do [ -s "$(REPORTS)/aaa/$$p.sarif" ] && tools/stamp.sh "$(TARGET)" "aaa-$$p" || true; done
 
 budget: guard require-live     ##[live] presupuesto del hilo principal del navegador (R8 3.22)
 	$(DC) --profile e2e run --rm playwright sh -c "mkdir -p /run && cp -r /e2e/. /run/ && mkdir -p /run/lib && cp -r /seclab-lib/. /run/lib/ && cd /run && npm init -y >/dev/null 2>&1 && npm i -D @playwright/test@1.49.0 >/dev/null 2>&1 && npx playwright test lib/specs/main-thread-budget.spec.ts --reporter=line"
@@ -377,7 +409,7 @@ ui-logs:          ##[admin] follow the web interface's own log
 # ---- teardown ----
 down: guard       ##[admin] stop everything and drop volumes (no residue)
 	$(DC) --profile clone --profile runtime --profile static --profile build \
-	      --profile dast --profile perf --profile e2e --profile prod \
+	      --profile dast --profile perf --profile e2e --profile prod --profile threat --profile aaa \
 	      down -v --remove-orphans
 
 purge: guard      ##[admin] delete this target's reports (data policy: they may hold real data)

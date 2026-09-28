@@ -1,0 +1,49 @@
+{
+  "_doc": [
+    "Sondas de AUTENTICACIÓN (pilar 1 de AAA). Las corre lib/specs/authn.spec.ts dentro de la",
+    "misma suite que `make e2e`; `make aaa` las convierte en aaa/authn.sarif. Cada sonda tiene un",
+    "`tipo` que el motor sabe ejecutar A TRAVÉS DEL ADAPTADOR del perfil (AUTH_ADAPTER), y unas",
+    "expectativas que son del proyecto. Tipos: login-fallido (rawLogin con contraseña mala: debe",
+    "quedar sin sesión), refresh-como-access (el refresh no vale como access; solo stacks con",
+    "refresh), logout-revoca (tras cerrar sesión la credencial vieja deniega), anonimo (peticiones",
+    "sin sesión con su status esperado), peticion (escape genérico: as none|A|B|fresh:A, use",
+    "access|refresh, repeat), limitador (N intentos fallidos -> 429; destructiva). `expect` admite",
+    "status[], denegado (401/403/404 o redirección a login, el mismo criterio que la matriz),",
+    "body_has[], body_lacks[], header_has{}. ${VAR} se expande desde target.env. `stride` es",
+    "opcional y solo sirve para el cruce con el modelo de amenazas en el informe. Presupuesto:",
+    "UN login real por rol y archivo (compartido por refresh-como-access, logout-revoca y",
+    "fresh:X) + UN login fallido: cuenta con el limitador de tu aplicación (E2E_PACE_MS).",
+    "Una sonda no aplicable en este stack (sin refresh, sin logout) consta como tal, no falla."
+  ],
+  "sondas": [
+    {
+      "id": "login-fallido",
+      "tipo": "login-fallido",
+      "rol": "B",
+      "severidad": "high",
+      "stride": "S",
+      "titulo": "una contraseña incorrecta no abre sesión y no delata nada",
+      "expect": { "body_lacks": ["Traceback", "Exception", "Warning:", "SQLSTATE"] }
+    },
+    {
+      "id": "anonimo-denegado",
+      "tipo": "anonimo",
+      "severidad": "high",
+      "stride": "E",
+      "titulo": "sin sesión, la ruta autenticada del perfil deniega",
+      "peticiones": [
+        { "method": "GET", "path": "${AUTH_CHECK_PATH}", "expect": { "denegado": true } }
+      ]
+    },
+    {
+      "id": "logout-revoca",
+      "tipo": "logout-revoca",
+      "rol": "A",
+      "severidad": "high",
+      "stride": "S",
+      "titulo": "tras cerrar sesión, la credencial vieja ya no vale",
+      "path": "${AUTH_CHECK_PATH}",
+      "expect": { "denegado": true }
+    }
+  ]
+}

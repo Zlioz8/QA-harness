@@ -63,7 +63,10 @@ test.describe('authorization matrix', () => {
     const method = (rule.method || 'GET').toUpperCase();
     for (const role of ['A', 'B'] as Role[]) {
       const should = rule.allow.includes(role);
-      test(`${method} ${rule.path} — role ${role} ${should ? 'allowed' : 'denied'}${rule.note ? ` (${rule.note})` : ''}`, async () => {
+      // La etiqueta es lo que hace que esta regla SUME a la dimensión aaa-authz (tools/aaa-sarif.py
+      // lee el título): un rol denegado que alcanza es elevación de privilegio (E); un rol legítimo
+      // bloqueado es una regresión de disponibilidad, sin letra. Nadie más parsea estos títulos.
+      test(`[authz][stride:${should ? '-' : 'E'}] ${method} ${rule.path} — role ${role} ${should ? 'allowed' : 'denied'}${rule.note ? ` (${rule.note})` : ''}`, async () => {
         const ctx = await loginAs(role);
         // Build an ABSOLUTE url instead of trusting Playwright's baseURL join: an absolute
         // path ("/grades/x") resolves against the ORIGIN and silently drops a baseURL path

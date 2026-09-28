@@ -1,7 +1,7 @@
 # QA-harness — laboratorio de auditoría/QA multiproyecto
 
 > **¿Vas a auditar un proyecto?** Empieza por `make siguiente TARGET=<proyecto>`: mira el estado
-> real y dice el próximo paso. El porqué del método está en [`METODOLOGIA.md`](METODOLOGIA.md) —
+> real y dice el próximo paso. El porqué del método está en [`docs/METODOLOGIA.md`](docs/METODOLOGIA.md) —
 > qué aportas tú, qué procesa la herramienta y qué interpretas tú, que son tres partes distintas
 > y saltarse la primera o la tercera no da error.
 
@@ -13,7 +13,7 @@ orquestación es `docker compose` declarativo y un `Makefile` de objetivos 1:1.
 
 > **¿Vienes a *usar* la herramienta, no a entenderla?** El paso a paso operativo del analista de QA
 > —alta del proyecto, credenciales, matriz de autorización, corrida, veredicto, triaje y entrega—
-> está en [`MANUAL_USO_QA.md`](MANUAL_USO_QA.md). Este README explica el diseño y el porqué.
+> está en [`docs/MANUAL_USO_QA.md`](docs/MANUAL_USO_QA.md). Este README explica el diseño y el porqué.
 
 **Requisito único en la máquina destino:** Docker + Docker Compose v2.
 **Requisito de capacidad:** sistema de archivos **por debajo del 90% de uso** (SonarQube falla en
@@ -21,12 +21,20 @@ silencio por encima) y ~8 GB para imágenes de herramientas. `make doctor` lo co
 
 ---
 
+![Flujo del laboratorio: entradas (.env) → herramientas → salidas (SARIF, JSON) → análisis](docs/img/flujo-laboratorio.png)
+
 ## Estructura
 
 ```
 SECURITY-LAB/
+  README.md              este documento: el diseño y el porqué. Lo operativo vive en docs/
   docker-compose.yml     núcleo: SÓLO herramientas. Ningún nombre de proyecto aparece aquí.
   Makefile               objetivos; TARGET=<perfil> elige el proyecto
+  docs/                  documentación vigente del laboratorio (no de un proyecto):
+                         METODOLOGIA (el método) · MANUAL_USO_QA (el paso a paso) ·
+                         PUERTOS (registro de convivencia) · PORTABILIDAD (mover el entorno) ·
+                         BITACORA_LABORATORIO (defectos del instrumento)
+  docs/historial/        informes cerrados sobre el propio laboratorio: se leen, no se editan
   lib/dimensions.yml     EL REGISTRO: qué dimensiones existen, qué artefacto deja cada una,
                          qué umbral la juzga, qué cuesta y dónde puede ejecutarse. Lo leen el
                          gate, el manifiesto, el informe, las dos pantallas de la UI y esta
@@ -43,18 +51,46 @@ SECURITY-LAB/
                          presupuesto del hilo principal)
   lib/semgrep/           reglas SAST propias del laboratorio, por pila (laravel-vue.yml)
   lib/k6/                sesión compartida para los scripts de carga
-  configs/               config de herramienta común a todos los perfiles (trivy.yaml)
-  scenarios/             fixtures SQL de escenario sembrado
-  baselines/             instantáneas de plataforma (código + dump); solo el MANIFEST se versiona
+  lib/aaa/presets/       eventos de auditoría por stack (moodle: mdl_logstore_standard_log)
+  configs/               la llave de despliegue de `make clone` (deploy_key, no versionada)
+  baselines/             instantáneas «antes de»: de plataforma (moodle-*: código + dump, solo el
+                         MANIFEST se versiona), del core (core-*) y de perfiles (perfil-*). Las
+                         dos últimas llevan datos y credenciales reales: nunca se versionan
   targets/<nombre>/      el perfil de un proyecto: target.env, target.env.local, compose.runtime.yml,
-                         zap/, k6/, playwright/, jmeter/, db-init/
-  work/                  clones hechos por `make clone`                        [no versionado]
+                         zap/, k6/, playwright/, jmeter/, db-init/, amenazas/ (modelo STRIDE),
+                         aaa/ (sondas de autenticación y eventos de auditoría), hallazgos/,
+                         riesgos/, CONTEXTO.md
+  work/<nombre>/         clones hechos por `make clone`                        [no versionado]
   reports/<nombre>/      salidas + RUN.md (qué se ejecutó y qué NO)            [no versionado]
+  reports/_entregas/     paquetes ya entregados (zip de informes y evidencias) [no versionado]
 ```
 
 La línea de corte: el núcleo hace lo que se puede saber **leyendo un repositorio**; el perfil aporta
 lo que sólo se sabe **conociendo la aplicación** (cómo arranca, cómo se inicia sesión, qué endpoints
 existen, qué rol puede alcanzar qué).
+
+### Dónde va cada cosa
+
+Cuatro preguntas deciden el sitio de un archivo, en este orden:
+
+1. **¿Lo ejecuta el laboratorio?** Núcleo: `Makefile`, `docker-compose.yml`, `tools/`, `ui/`,
+   `lib/`, `recipes/`. Se versiona siempre.
+2. **¿Describe el laboratorio o el método?** `docs/` si sigue vigente; `docs/historial/` si es un
+   informe cerrado. En la raíz solo queda `README.md`.
+3. **¿Es de UN proyecto?** `targets/<perfil>/`: contrato, guiones, hallazgos, riesgos, contexto.
+   Lo que el proyecto necesita en local pero no puede publicarse va en `target.env.local`.
+4. **¿Es dato, no código?** No se versiona: `reports/` (lo que escriben las herramientas),
+   `work/` (clones), `baselines/` (instantáneas «antes de» de plataforma, core o perfil).
+
+Dos reglas transversales:
+
+- **Cuatro niveles de carpetas como máximo** bajo la raíz (`targets/antiplagio/corpus/EV-A/` es el
+  cuarto). Si algo pide un quinto, se aplana. Las únicas excepciones son el árbol que una
+  herramienta escribe dentro de `reports/<perfil>/<herramienta>/` (el visor HTML de Qodana o de
+  JMeter trae el suyo) y el interior de un clon en `work/`.
+- **Una copia de seguridad no se hace al lado del original.** Va a
+  `baselines/perfil-<perfil>-precambios-<fecha>/` y `.gitignore` la excluye por nombre: un
+  `movil.bak-*` junto a `movil/` hereda las credenciales, pero no la regla que las protege.
 
 ---
 
@@ -195,8 +231,12 @@ Tres decisiones deliberadas de esa página:
 | Artefacto móvil (APK/IPA) | MobSF | `make mobile-scan` | `mobile/mobsf.sarif` | no |
 | Contrato de API (Spectral) | Spectral | `make api-lint` | `api/spectral.sarif` | no |
 | Contrato vs implementación (Schemathesis) | Schemathesis | `make api-fuzz` | `api/schemathesis.xml` | **sí** |
+| Modelo de amenazas (STRIDE) | Threagile | `make amenazas` | `amenazas/threagile.sarif` · `amenazas/data-flow-diagram.png` | no |
 | Superficie runtime (DAST) | OWASP ZAP | `make dast` | `zap/zap.sarif` · `zap/zap-report.html` | **sí** |
 | Autorización y flujos (E2E) | Playwright | `make e2e` | `playwright/results.json` | **sí** |
+| AAA · autenticación | Playwright | `make aaa` | `aaa/authn.sarif` · `aaa/AAA.md` | **sí** |
+| AAA · autorización (matriz) | Playwright | `make aaa` | `aaa/authz.sarif` · `aaa/AAA.md` | **sí** |
+| AAA · auditoría (oráculo) | psql | `make aaa` | `aaa/acct.sarif` · `aaa/AAA.md` | **sí** |
 | Carga (k6) | k6 | `make perf` | `k6/summary.json` | **sí** |
 | Carga (JMeter) | JMeter | `make perf-jmeter` | `jmeter/results.jtl` | **sí** |
 | Flujos de usuario en navegador (MCP) | Playwright MCP | `make mcp-journey` | `mcp/journeys.md` | **sí** |
@@ -205,9 +245,11 @@ Tres decisiones deliberadas de esa página:
 
 `make static` = `secrets deps config-scan sbom semgrep qodana sonar`, y `make live` = `dast perf
 e2e`: los dos agregados cubren lo habitual, no *todo* lo etiquetado. Las dimensiones que dependen
-de un artefacto del perfil —`api-lint`, `api-fuzz`, `build`, `perf-jmeter`, `budget`, `image-scan`—
-se invocan aparte, a propósito: incluirlas en el agregado haría que un perfil sin plan `.jmx` o sin
-OpenAPI arrastrara un `NO DISPONIBLE` en cada corrida. `make all` = `static live`.
+de un artefacto del perfil —`api-lint`, `api-fuzz`, `build`, `perf-jmeter`, `budget`, `image-scan`,
+`amenazas`, `aaa`— se invocan aparte, a propósito: incluirlas en el agregado haría que un perfil sin
+plan `.jmx` o sin OpenAPI arrastrara un `NO DISPONIBLE` en cada corrida. `make all` = `static live`.
+`make aaa` (autenticación · autorización · auditoría) sustituye a `make e2e` cuando el perfil trae
+guiones AAA: es la misma suite más el oráculo de auditoría y un SARIF por pilar.
 
 ### Reglas SAST propias (`lib/semgrep/`)
 
@@ -297,7 +339,7 @@ Está escrito aquí porque es el modo de fallo más probable de esta herramienta
   razonamiento se pierde en cuanto cierras la sesión.
 
 Detalle completo, con la evidencia de la corrida que lo demostró, en
-[`INFORME_MIGRACION_SECURITY_LAB.md`](INFORME_MIGRACION_SECURITY_LAB.md).
+[`docs/historial/INFORME_MIGRACION_SECURITY_LAB.md`](docs/historial/INFORME_MIGRACION_SECURITY_LAB.md).
 
 ---
 

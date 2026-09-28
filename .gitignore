@@ -66,3 +66,32 @@ targets/*/deps/*.env
 targets/*/deps/composer.*
 # baselines del core (config de nginx/pg_hba, fotos de convivencia): evidencia por-máquina, no lab.
 baselines/core-*/
+
+# --- antiplagio: material de la auditoría con identidades reales ---
+# El escenario de demo, su corpus, el entorno local, la recuperación de preprod, los flujos MCP y
+# los hallazgos nombran usuarios reales del Moodle copia de preprod (ap<cédula>, las cédulas de
+# las cuentas de prueba) y usuarios y URLs de preprod. Uno de los dos remotos es PÚBLICO: se
+# quedan en disco y en la USB (docs/PORTABILIDAD.md), como el perfil movil. Para versionarlos
+# hay que seudonimizarlos antes; lo demás del perfil (target.env, specs, zap, k6) sí se versiona.
+targets/antiplagio/escenario/
+targets/antiplagio/corpus/
+targets/antiplagio/build/
+targets/antiplagio/entorno-local/
+targets/antiplagio/mcp/
+targets/antiplagio/hallazgos/
+targets/antiplagio/CONTEXTO.md
+targets/antiplagio/RECUPERACION-PREPROD.md
+targets/antiplagio/target.env.local.example
+
+# --- copias de seguridad manuales: nunca al repo ---
+# Una copia "antes de tocar" de un perfil o de un target.env lleva las mismas credenciales que el
+# original, pero NO la protege la regla del original (`targets/movil/`, `target.env.local`): el
+# 2026-09-22 `targets/movil.bak-20260922/target.env` (SONAR_TOKEN + cuentas reales) quedó como
+# archivo sin seguimiento a un `git add -A` de publicarse. Dos reglas cierran ese hueco:
+#   1. las copias previas a un cambio viven en baselines/perfil-<perfil>-precambios-<fecha>/
+#   2. y cualquier sufijo de copia queda excluido esté donde esté.
+baselines/perfil-*/
+*.bak
+*.bak-*
+*.antes-*
+*.orig

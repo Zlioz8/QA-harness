@@ -29,6 +29,7 @@ Uso:  tools/report.py <target> [--ronda-nueva] [--pendientes]
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -286,8 +287,10 @@ def verificado(target: str) -> str:
             + "\n\n---\n\n")
 
 
-def detalle(target: str, conf: list[dict], ronda: int, sin_triar: list[dict]) -> str:
+def detalle(target: str, conf: list[dict], ronda: int, sin_triar: list[dict],
+            aparte: list[dict] | None = None) -> str:
     conf = sorted(conf, key=clave_orden)
+    aparte = aparte or []
     out = ["## 3. Hallazgos\n\n"]
     if not conf:
         out.append("Ninguno confirmado en esta ronda. Conviene leer §4 antes de celebrarlo: "
@@ -346,6 +349,18 @@ def detalle(target: str, conf: list[dict], ronda: int, sin_triar: list[dict]) ->
             emoji, nombre = SEV.get(fs[0].get("severidad", "unranked"), ("⚪", "?"))
             out.append(f"| {dim} | `{tit}` | {len(fs)} | {emoji} {nombre} |\n")
         out.append("</details>\n\n" if analisis else "\n")
+
+    if aparte:
+        out.append(f"### 3.y Juzgados sin acción en esta ronda ({len(aparte)})\n\n"
+                   "Una persona los leyó y decidió no perseguirlos ahora: riesgo **aceptado** (con quién lo "
+                   "asume y hasta cuándo), **deuda técnica** (real, no prioritaria) o **fuera de alcance** (es de "
+                   "otro equipo, y se dice de cuál). No suman al veredicto; un aceptado vencido vuelve a contar.\n\n"
+                   "| # | Hallazgo | Veredicto | Razón | Quién | Hasta |\n|---|---|---|---|---|---|\n")
+        for f in sorted(aparte, key=lambda x: (x.get("_juicio", {}).get("verdict", ""), x["id"])):
+            j = f.get("_juicio", {})
+            out.append(f"| {f['id']} | `{f['titulo']}` | {triagelib.LABELS.get(j.get('verdict', ''), j.get('verdict', ''))} | "
+                       f"{j.get('note', '')} | {j.get('dueno', '') or '—'} | {j.get('hasta', '') or '—'} |\n")
+        out.append("\n")
 
     out.append("---\n\n")
     return "".join(out)
@@ -449,11 +464,153 @@ Artefactos: `reports/{target}/` — uno por dimensión, más `.provenance/` con 
 
 - **La política de autorización.** Un 200 solo es hallazgo si la política decía 403, y esa política
   la escribe una persona en `playwright/authz-matrix.json`.
+- **La auditoría sin oráculo.** Que un login «se registró» solo lo dice la tabla de auditoría, no la
+  respuesta 200: sin `AAA_DB_URL` en `target.env.local`, nadie lo afirma.
 - **El abuso de lógica de negocio.** Esos guiones se escriben después de leer el código.
 - **La severidad en contexto institucional** (datos personales, procesos regulados).
 - **Distinguir un fallo del proyecto de uno del entorno.** Si una dimensión no corrió por falta de
   memoria, eso no dice nada sobre el proyecto.
 """
+
+
+# ---------------------------------------------------------------- STRIDE y AAA
+#
+# Dos secciones SEPARADAS, porque son dos preguntas: el modelo de amenazas dice qué puede pasar
+# (seis letras); los controles AAA dicen qué hace el sistema con la identidad (tres pilares). El
+# único cruce es una columna de la tabla STRIDE con los controles medidos por letra. Cada función
+# devuelve "" si su artefacto no existe: un perfil sin estas dimensiones produce el mismo informe
+# de siempre.
+
+_STRIDE_RE = {
+    "S": r"spoofing|suplantaci",
+    "T": r"tampering|manipulaci",
+    "R": r"repudiation|repudio",
+    "I": r"information[ -]disclosure|revelaci|divulgaci",
+    "D": r"denial[ -]of[ -]service|denegaci",
+    "E": r"elevation[ -]of[ -]privilege|elevaci",
+}
+_STRIDE_NOMBRE = {"S": "Spoofing", "T": "Tampering", "R": "Repudiation", "I": "Information disclosure",
+                  "D": "Denial of service", "E": "Elevation of privilege"}
+
+
+def _leer_json(p: str):
+    try:
+        return json.load(open(p, encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _fichas_por_letra(target: str) -> dict[str, list[str]]:
+    """Fichas riesgos/<ID>.md por letra, leyendo la sección `## STRIDE` de cada una."""
+    out: dict[str, list[str]] = {c: [] for c in "STRIDE"}
+    d = os.path.join(LAB, "targets", target, "riesgos")
+    if not os.path.isdir(d):
+        return out
+    for f in sorted(os.listdir(d)):
+        if not f.endswith(".md"):
+            continue
+        txt = open(os.path.join(d, f), encoding="utf-8", errors="replace").read()
+        m = re.search(r"^## STRIDE\s*$(.*?)(?=^## |\Z)", txt, re.M | re.S)
+        if not m:
+            continue
+        for c, rx in _STRIDE_RE.items():
+            if re.search(rx, m.group(1), re.I):
+                out[c].append(f[:-3])
+    return out
+
+
+def _amenazas_por_letra(rep: str):
+    """{letra: {severidad: n}} desde el SARIF de Threagile, o None si no existe."""
+    doc = _leer_json(os.path.join(rep, "amenazas", "threagile.sarif"))
+    if doc is None:
+        return None
+    out: dict[str, dict[str, int]] = {c: {} for c in "STRIDE"}
+    for run in doc.get("runs", []):
+        reglas = {r.get("id"): r for r in run.get("tool", {}).get("driver", {}).get("rules", [])}
+        for res in run.get("results", []):
+            tags = [str(t) for t in reglas.get(res.get("ruleId"), {}).get("properties", {}).get("tags", [])]
+            letra = next((t.split(":", 1)[1] for t in tags if t.startswith("stride:")), "?")
+            sev = next((t for t in tags if t in ("critical", "high", "medium", "low")), "unranked")
+            out.setdefault(letra, {})
+            out[letra][sev] = out[letra].get(sev, 0) + 1
+    return out
+
+
+def _sin_titulo(p: str) -> str:
+    """Un .md generado, sin su `# título`, para inlinearlo bajo <details>."""
+    try:
+        lineas = open(p, encoding="utf-8").read().splitlines()
+    except OSError:
+        return ""
+    if lineas and lineas[0].startswith("# "):
+        lineas = lineas[1:]
+    return "\n".join(lineas).strip()
+
+
+def amenazas_stride(target: str, rep: str) -> str:
+    por = _amenazas_por_letra(rep)
+    if por is None:
+        return ""
+    aaa = _leer_json(os.path.join(rep, "aaa", "aaa.json")) or {}
+    fichas = _fichas_por_letra(target)
+    total = sum(sum(v.values()) for v in por.values())
+    out = [f"## 4. Modelo de amenazas (STRIDE)\n\n",
+           f"Threagile evaluó `targets/{target}/amenazas/threagile.yaml` y derivó **{total}** riesgos; cada uno "
+           "lleva la letra de su regla y se juzga en el triaje como cualquier otro hallazgo. La tabla cruza las "
+           "seis letras con las fichas de riesgo escritas a mano y con los controles AAA medidos en vivo.\n\n",
+           "| STRIDE | Amenazas modeladas | Fichas `riesgos/` con esa letra | Controles AAA medidos con esa letra |\n",
+           "|---|---|---|---|\n"]
+    for c in "STRIDE":
+        sevs = por.get(c, {})
+        n = sum(sevs.values())
+        desglose = " · ".join(f"{s} {sevs[s]}" for s in ("critical", "high", "medium", "low", "unranked") if sevs.get(s))
+        amen = f"**{n}** ({desglose})" if n else "0"
+        fich = ", ".join(fichas[c]) or "—"
+        p = f = 0
+        for pilar in ("authn", "authz", "acct"):
+            pl = (aaa.get(pilar) or {}).get("por_letra", {}).get(c, {})
+            p += pl.get("pass", 0)
+            f += pl.get("fail", 0)
+        ctrl = (f"pass {p} / fail {f}" if (p or f) else "—") if aaa else "— (AAA no medida)"
+        out.append(f"| **{c}** {_STRIDE_NOMBRE[c]} | {amen} | {fich} | {ctrl} |\n")
+    if por.get("?"):
+        out.append(f"| sin letra | {sum(por['?'].values())} | | |\n")
+    out.append("\nUna letra con amenazas modeladas y sin sondas es un control que se da por supuesto; una letra con "
+               "sondas y sin amenazas es una medición sin modelo detrás. Ninguna regla builtin de Threagile es "
+               "Repudiation: la **R** sale de `individual_risk_categories` del modelo y se mide con la auditoría de AAA.\n\n")
+    cuerpo = _sin_titulo(os.path.join(rep, "amenazas", "amenazas.md"))
+    if cuerpo:
+        out.append(f"<details><summary>Riesgos derivados del modelo (`reports/{target}/amenazas/amenazas.md`)</summary>\n\n{cuerpo}\n\n</details>\n\n")
+    out.append("---\n\n")
+    return "".join(out)
+
+
+def aaa_pilares(target: str, rep: str) -> str:
+    aaa = _leer_json(os.path.join(rep, "aaa", "aaa.json"))
+    if not aaa:
+        return ""
+    a, z, c = aaa.get("authn") or {}, aaa.get("authz") or {}, aaa.get("acct") or {}
+    db = c.get("db", "sin-oraculo")
+    out = ["## 4. AAA: autenticación · autorización · auditoría\n\n",
+           "Tres pilares, tres guiones del perfil, tres veredictos con presupuesto 0: un control que falla no se "
+           "administra por umbral, se corrige o se acepta con razón. `pass` es un control que se sostiene; `no aplica`, "
+           "una sonda que este stack no puede ejecutar; `no disponible`, una medición que no se hizo.\n\n",
+           "| Pilar | Guion | Medido | Pass | Fail | No aplica / no disponible |\n|---|---|---|---|---|---|\n",
+           f"| Autenticación | `aaa/authn.json` | {'sí' if a.get('guion') else '**NO**'} | {a.get('pass', 0)} | {a.get('fail', 0)} | "
+           f"{a.get('no_aplica', 0)} no aplica · {a.get('no_ejecutada', 0)} no ejecutada |\n",
+           f"| Autorización | `playwright/authz-matrix.json` | {'sí' if z.get('guion') else '**NO**'} | {z.get('pass', 0)} | {z.get('fail', 0)} | "
+           f"{z.get('no_ejecutada', 0)} no ejecutada |\n",
+           f"| Auditoría | `aaa/acct.json` (oráculo: {db}) | {'sí' if db == 'disponible' else '**NO**'} | {c.get('pass', 0)} | "
+           f"{c.get('fail', 0)} | {c.get('error', 0)} error · {c.get('no_disponible', 0)} no disponible |\n\n"]
+    if db != "disponible":
+        out.append("> ⚠️ **La auditoría (repudio) no se midió**: sin `AAA_DB_URL` en `target.env.local` no hay oráculo "
+                   "que confirme que un login, un intento fallido o un cierre de sesión dejaron rastro. Que la "
+                   "aplicación «registra» no lo afirma nadie en esta ronda.\n\n")
+    cuerpo = _sin_titulo(os.path.join(rep, "aaa", "AAA.md"))
+    if cuerpo:
+        out.append(f"<details><summary>Sondas, reglas y eventos (`reports/{target}/aaa/AAA.md`)</summary>\n\n{cuerpo}\n\n</details>\n\n")
+    out.append("---\n\n")
+    return "".join(out)
 
 
 # ---------------------------------------------------------------- ensamblado
@@ -465,8 +622,10 @@ def build(target: str, nueva_ronda: bool = False):
 
     datos = findlib.collect(rep)
     juicios = triagelib.load(rep)
+    # Ni el falso positivo ni el mitigado (control medido que pasa) siguen abiertos: el registro
+    # los cierra en esta ronda, con su nota, y si reaparecen sin juicio volverán a abrirse.
     presentes = {f["key"]: f for f in datos["findings"]
-                 if (juicios.get(f["key"]) or {}).get("verdict") != "falso-positivo"}
+                 if (juicios.get(f["key"]) or {}).get("verdict") not in ("falso-positivo", "mitigado")}
 
     filas_prev = reg.cargar(tdir)
     ronda = reg.ronda_actual(filas_prev) + (1 if nueva_ronda else 0)
@@ -480,9 +639,21 @@ def build(target: str, nueva_ronda: bool = False):
             return True
         return (juicios.get(f["clave"]) or {}).get("verdict") in ("bloqueante", "corregir")
 
+    def juicio(f):
+        return juicios.get((f.get("clave") or "").strip()) or {}
+
     abiertos = [f for f in filas if f.get("estado") in ("abierto", "reabierto")]
     conf = [f for f in abiertos if confirmado(f) and not f["id"].startswith("L")]
-    sin_triar = [f for f in abiertos if not confirmado(f) and not f["id"].startswith("L")]
+    # Juzgado SIN acción (aceptado, deuda, fuera de alcance): no es señal sin triar —alguien ya lo
+    # miró y dijo por qué no se persigue— y no puede ir a la tabla de «sin juicio humano» como
+    # si nadie lo hubiera leído. Va en su propia tabla, con la nota, el dueño y la fecha.
+    aparte = [f for f in abiertos if not confirmado(f) and not f["id"].startswith("L")
+              and triagelib.VERDICT_INFO.get(juicio(f).get("verdict", ""), {}).get("gate") == "aparte"]
+    ids_aparte = {f["id"] for f in aparte}
+    sin_triar = [f for f in abiertos if not confirmado(f) and not f["id"].startswith("L")
+                 and f["id"] not in ids_aparte]
+    for f in aparte:
+        f["_juicio"] = juicio(f)
     cerrados = [f for f in res["cerrados"] if not f["id"].startswith("L")]
 
     cob = cobertura(target, rep)
@@ -497,7 +668,9 @@ def build(target: str, nueva_ronda: bool = False):
         cabecera(target, ronda, src, cob),
         resumen(target, conf, cerrados, ronda, ver),
         verificado(target),
-        detalle(target, conf, ronda, sin_triar),
+        detalle(target, conf, ronda, sin_triar, aparte),
+        amenazas_stride(target, rep),
+        aaa_pilares(target, rep),
         cobertura_tabla(target, cob, conf, sin_triar),
         observaciones(target),
         cierre(target),

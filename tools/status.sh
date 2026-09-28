@@ -15,6 +15,7 @@ if [ -d "$R" ]; then find "$R" -type f -size +0 -printf '  %-52p %6s bytes\n' 2>
 echo
 echo "-- missing --"
 for f in gitleaks.sarif trivy/trivy-fs.sarif trivy/trivy-config.sarif semgrep/semgrep.sarif \
-         sbom/sbom.spdx.json zap/zap-report.html k6/summary.json playwright/results.json RUN.md; do
+         sbom/sbom.spdx.json zap/zap-report.html k6/summary.json playwright/results.json \
+         amenazas/threagile.sarif aaa/authn.sarif aaa/authz.sarif aaa/acct.sarif RUN.md; do
   [ -s "$R/$f" ] || echo "  $f"
 done

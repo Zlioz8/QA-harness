@@ -116,7 +116,7 @@ sudo -u postgres pg_restore --clean --if-exists --no-owner -d moodle \
   de #2 lo reescribía entero y habría tumbado el CMS de `/`).
 - **`pg_hba.conf`.** El plugin lee su propia base por la conexión de Moodle; no hace falta rol de
   sólo lectura ni línea nueva para la red Docker.
-- **Puertos.** Este proyecto no publica ninguno. `PUERTOS.md` no cambia.
+- **Puertos.** Este proyecto no publica ninguno. `docs/PUERTOS.md` no cambia.
 - **Los otros despliegues.** Ningún `make down` de #2, #3 ni #6.
 
 ## Estado final decidido

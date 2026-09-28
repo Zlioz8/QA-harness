@@ -20,7 +20,7 @@
 #   QODANA_TOKEN SEMGREP_CONFIG  BASE_URL  APP_INTERNAL_URL  ALLOWED_ORIGIN
 #   ROLE_A_USER ROLE_A_PASS ROLE_B_USER ROLE_B_PASS
 #
-# Profiles:  clone | static | dast | perf | e2e     (runtime/build come from the target)
+# Profiles:  clone | static | dast | perf | e2e | threat | aaa     (runtime/build come from the target)
 
 services:
 
@@ -266,6 +266,33 @@ services:
       - ./reports/${TARGET_NAME}/sbom:/reports
     command: >
       scan dir:/repo -o spdx-json=/reports/sbom.spdx.json -o table=/reports/sbom.txt
+
+  # ---------- threat model (STRIDE) ----------
+  # Threagile evalúa el modelo de amenazas del perfil (activos, enlaces, fronteras) con sus
+  # reglas, cada una con su letra STRIDE, y deja risks.json; tools/threagile-sarif.py lo convierte.
+  # Imagen FIJADA: 0.9.1 es la última publicada (2024-07) y master está reescrito con otros flags.
+  # Los flags son del paquete `flag` de Go: un guion, y los booleanos se apagan con `-x=false`
+  # (con `-x false` el "false" se lee como un archivo). PDF y Excel apagados: no los consume
+  # nadie y el PDF es lo único que puede fallar por fuentes. El diagrama PNG se genera ANTES que
+  # risks.json: si graphviz muriera no habría artefacto, y `make amenazas` lo comprueba y lo dice.
+  #
+  # La imagen corre como uid 1000. El directorio de salida lo pre-crea `guard` como el usuario
+  # del host, y el contenedor se ejecuta con ESE uid (el Makefile pasa LAB_UID/LAB_GID) para que
+  # la salida quede del host y no de root ni de un 1000 ajeno.
+  threagile:
+    profiles: ["threat"]
+    image: threagile/threagile:0.9.1
+    mem_limit: 512m
+    user: "${LAB_UID:-1000}:${LAB_GID:-1000}"
+    volumes:
+      - ./targets/${TARGET_NAME}/amenazas:/app/work/model:ro
+      - ./reports/${TARGET_NAME}/amenazas:/app/work/out
+    command: >
+      -model /app/work/model/threagile.yaml -output /app/work/out
+      -generate-risks-json -generate-technical-assets-json -generate-stats-json
+      -generate-data-flow-diagram -generate-data-asset-diagram=false
+      -generate-risks-excel=false -generate-tags-excel=false -generate-report-pdf=false
+      -ignore-orphaned-risk-tracking
 
   # ---------- dast ----------
   # Declarative plan; ZAP interprets it. The plan is per-target because contexts and
@@ -568,8 +595,13 @@ services:
       ROLE_A_PASS: ${ROLE_A_PASS:-}
       ROLE_B_USER: ${ROLE_B_USER:-}
       ROLE_B_PASS: ${ROLE_B_PASS:-}
+      # Sondas AAA destructivas (lib/specs/authn.spec.ts): del entorno o de target.env.
+      AAA_DESTRUCTIVO: ${AAA_DESTRUCTIVO:-0}
     volumes:
       - ./targets/${TARGET_NAME}/playwright:/e2e:ro
+      # El perfil entero, solo lectura: las sondas AAA leen aaa/authn.json de aquí (el motor es
+      # genérico; lo que cambia por proyecto es ese guion).
+      - ./targets/${TARGET_NAME}:/profile:ro
       # /seclab-lib, not /lib — see the note on the k6 service.
       - ./lib:/seclab-lib:ro
       - ./reports/${TARGET_NAME}/playwright:/reports
@@ -579,6 +611,29 @@ services:
              npm init -y >/dev/null 2>&1 &&
              npm i -D @playwright/test@1.49.0 >/dev/null 2>&1 &&
              npx playwright test"
+
+  # ---------- AAA: oráculo de auditoría ----------
+  # ¿Lo que las sondas hicieron quedó REGISTRADO? psql contra la base de la aplicación con una
+  # cadena de SOLO LECTURA que aporta el perfil (AAA_DB_URL, en target.env.local, nunca en el
+  # contrato; llega por env_file, no por `environment`, para que un --env-file incompleto no la
+  # pise con vacío). network_mode: host porque la base de un despliegue local escucha en
+  # 127.0.0.1. El SQL entra por stdin (psql interpola :'t0', :'marker', :'usuario' y :'rol' solo
+  # en la entrada, no en -c) y tools/aaa-oracle.sh le antepone default_transaction_read_only por
+  # si la cadena tuviera más permisos de los que debería. Lo conduce tools/aaa-oracle.sh.
+  aaa-oracle:
+    profiles: ["aaa"]
+    image: postgres:16
+    network_mode: host
+    env_file:
+      - path: ./targets/${TARGET_NAME}/target.env
+        required: true
+      - path: ./targets/${TARGET_NAME}/target.env.local
+        required: false
+    environment:
+      PGCONNECT_TIMEOUT: "10"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - psql "$$AAA_DB_URL" -X -A -t -q -v ON_ERROR_STOP=1 -v t0="$$T0" -v marker="$$MARKER" -v usuario="$$USUARIO" -v rol="$$ROL" -f -
 
   # ---------- ui ----------
   # Local, single-operator web interface. See ui/app.py for the scope decision.

@@ -20,6 +20,10 @@ MAX_SAST_FINDINGS=$(envget MAX_SAST_FINDINGS)
 MAX_QUALITY_FINDINGS=$(envget MAX_QUALITY_FINDINGS)
 MAX_DAST_FINDINGS=$(envget MAX_DAST_FINDINGS)
 MAX_MOBILE_FINDINGS=$(envget MAX_MOBILE_FINDINGS)
+MAX_THREAT_FINDINGS=$(envget MAX_THREAT_FINDINGS)
+MAX_AUTHN_FINDINGS=$(envget MAX_AUTHN_FINDINGS)
+MAX_AUTHZ_FINDINGS=$(envget MAX_AUTHZ_FINDINGS)
+MAX_ACCT_FINDINGS=$(envget MAX_ACCT_FINDINGS)
 K6_P95_MS=$(envget K6_P95_MS)
 K6_ERR_RATE=$(envget K6_ERR_RATE)
 
@@ -135,7 +139,8 @@ for _d in deploy-contract:deploy-contract.sarif \
           gitleaks:gitleaks.sarif trufflehog:trufflehog.sarif trivy-fs:trivy/trivy-fs.sarif \
           trivy-config:trivy/trivy-config.sarif semgrep:semgrep/semgrep.sarif \
           sonar:sonar/sonar.sarif qodana:qodana/qodana.sarif mobsf:mobile/mobsf.sarif \
-          api-lint:api/spectral.sarif zap:zap/zap.sarif; do
+          api-lint:api/spectral.sarif zap:zap/zap.sarif \
+          amenazas:amenazas/threagile.sarif aaa-authn:aaa/authn.sarif aaa-authz:aaa/authz.sarif aaa-acct:aaa/acct.sarif; do
   _id="${_d%%:*}"; _f="$R/${_d#*:}"
   _n=$(bloqueantes "$_f" "$_id")
   [ "$_n" -gt 0 ] 2>/dev/null && { NBLOQ=$((NBLOQ + _n)); \
@@ -235,6 +240,40 @@ if excluida zap "DAST"; then n=-1; else n=$(sarif_count "$R/zap/zap.sarif" zap);
 if [ "$n" -lt 0 ]; then skip "ZAP not run"
 elif [ "$n" -le "${MAX_DAST_FINDINGS:-999}" ]; then pass "DAST alerts: $n (max ${MAX_DAST_FINDINGS:-999})"
 else fail "DAST alerts: $n (max ${MAX_DAST_FINDINGS:-999})"; fi
+
+# ---- modelo de amenazas (STRIDE) --------------------------------------------------------------
+# Presupuesto amplio por defecto (999): el primer modelo de un sistema produce decenas de riesgos
+# que hay que LEER y juzgar. Bloquear el día uno enseñaría a recortar el modelo, no a mejorar el
+# sistema; el perfil lo baja cuando el triaje haya pasado por ellos.
+stale_check "$R/amenazas/threagile.sarif" "amenazas"
+if excluida amenazas "amenazas"; then n=-1; else n=$(sarif_count "$R/amenazas/threagile.sarif" amenazas); fi
+if [ "$n" -lt 0 ]; then skip "modelo de amenazas no evaluado (make amenazas)"
+elif [ "$n" -le "${MAX_THREAT_FINDINGS:-999}" ]; then pass "amenazas STRIDE sin juzgar o a corregir: $n (max ${MAX_THREAT_FINDINGS:-999})"
+else fail "amenazas STRIDE sin juzgar o a corregir: $n (max ${MAX_THREAT_FINDINGS:-999}) — ver reports/$TARGET/amenazas/amenazas.md"; fi
+
+# ---- AAA: autenticación · autorización · auditoría -------------------------------------------
+# Tres pilares, tres veredictos. Presupuesto 0: una sonda de autenticación que falla, una regla de
+# la matriz que un rol alcanza sin derecho, o un evento que no dejó rastro, son un control que NO
+# está — y un control ausente no se administra por presupuesto: se corrige, o se acepta en el
+# triaje con razón escrita. La matriz vota dos veces a propósito: en `playwright` (¿la suite
+# pasó?) y aquí (¿el control de acceso se sostiene?). Misma cláusula que playwright:
+# E2E_NO_CONCLUYENTE=1 convierte el resultado en skip, con su razón visible.
+aaa_pilar() {   # $1 = id de dimensión   $2 = artefacto   $3 = etiqueta   $4 = umbral
+  local id="$1" f="$R/$2" lbl="$3" max="$4"
+  stale_check "$f" "$lbl"
+  if excluida "$id" "$lbl"; then n=-1; else n=$(sarif_count "$f" "$id"); fi
+  if [ "$n" -lt 0 ]; then skip "$lbl no medida (make aaa)"
+  elif [ "$(envget E2E_NO_CONCLUYENTE)" = "1" ]; then skip "$lbl: $n fallo(s) — NO CONCLUYENTE en este entorno (E2E_NO_CONCLUYENTE=1)"
+  elif [ "$n" -le "$max" ]; then pass "$lbl: $n fallo(s) (max $max)"
+  else fail "$lbl: $n fallo(s) (max $max) — ver reports/$TARGET/aaa/AAA.md"; fi
+}
+aaa_pilar aaa-authn aaa/authn.sarif "AAA · autenticación" "${MAX_AUTHN_FINDINGS:-0}"
+aaa_pilar aaa-authz aaa/authz.sarif "AAA · autorización" "${MAX_AUTHZ_FINDINGS:-0}"
+aaa_pilar aaa-acct  aaa/acct.sarif  "AAA · auditoría"    "${MAX_ACCT_FINDINGS:-0}"
+# La auditoría sin oráculo NO es un pass: se dice en su propia línea, aunque no haya SARIF.
+if [ -f "$R/aaa/oracle.json" ] && python3 -c 'import json,sys; ev=json.load(open(sys.argv[1])).get("eventos",[]); sys.exit(0 if ev and all(e.get("resultado")=="no-disponible" for e in ev) else 1)' "$R/aaa/oracle.json" 2>/dev/null; then
+  skip "AAA · auditoría: oráculo NO DISPONIBLE (AAA_DB_URL vacío en target.env.local) — la contabilidad no se midió"
+fi
 
 # k6: a p95 or error rate outside the SLO is a failure, not a note in a log.
 S="$R/k6/summary.json"

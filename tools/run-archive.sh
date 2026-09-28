@@ -48,7 +48,9 @@ fi
 ln -sfn "runs/$STAMP" "$R/latest"   # convenience pointer; relative so the tree stays movable
 
 # Retention. Re-auditing ~30 repositories several rounds each fills a disk otherwise.
-KEEP=$(lab_get KEEP_RUNS); KEEP=${KEEP:-5}
+# KEEP_RUNS del perfil (target.env[.local]) o del entorno. Antes llamaba a `lab_get`, que vivía en
+# un lab.env por máquina que nunca llegó a la rama principal: la llamada fallaba en silencio.
+KEEP=$(envget KEEP_RUNS); KEEP=${KEEP:-${KEEP_RUNS:-5}}
 if [ "$KEEP" -gt 0 ] 2>/dev/null; then
   # Newest first, drop everything past the Nth. `ls -1` on stamped names sorts chronologically
   # because the stamp leads with the date.

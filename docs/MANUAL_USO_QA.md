@@ -4,8 +4,8 @@ Guía operativa para el **analista de QA / calidad y seguridad** que recibe esta
 que auditar un proyecto de principio a fin: desde `git clone` del laboratorio hasta un informe con
 veredicto, cobertura declarada y triaje registrado.
 
-No es el documento de diseño (eso es [`README.md`](README.md)) ni el historial de decisiones
-(eso es [`INFORME_MIGRACION_SECURITY_LAB.md`](INFORME_MIGRACION_SECURITY_LAB.md)). Aquí solo está
+No es el documento de diseño (eso es [`README.md`](../README.md)) ni el historial de decisiones
+(eso es [`INFORME_MIGRACION_SECURITY_LAB.md`](historial/INFORME_MIGRACION_SECURITY_LAB.md)). Aquí solo está
 **qué hace una persona, en qué orden, y cómo sabe que lo hizo bien**.
 
 ---
@@ -287,9 +287,79 @@ E2E_PACE_MS=1200
 | Carga con plan propio | `jmeter/plan.jmx` (o `JMETER_PLAN=`) | `NO DISPONIBLE` |
 | Contrato de API | `OPENAPI_SPEC=` / `OPENAPI_SPEC_URL=` en `target.env` | `NO DISPONIBLE` |
 | Build de producción | servicio `front-build` (o `BUILD_SERVICE=`) en `compose.runtime.yml` | `NO DISPONIBLE` |
+| Modelo de amenazas (STRIDE) | `amenazas/threagile.yaml` | `NO DISPONIBLE` |
+| AAA · autenticación | `aaa/authn.json` (sondas tipadas; el motor es `lib/specs/authn.spec.ts`) | `NO DISPONIBLE` |
+| AAA · autorización | `playwright/authz-matrix.json` (la matriz de siempre) | `NO DISPONIBLE` |
+| AAA · auditoría | `aaa/acct.json` + `AAA_DB_URL` en `target.env.local` | `NO DISPONIBLE` |
 
 `NO DISPONIBLE` (este perfil aún no puede medirlo) y `NO EJECUTADO` (podía y no se hizo) son cosas
 distintas y el manifiesto las registra distinto. No las mezcles en el informe.
+
+### 4.8 El modelo de amenazas (STRIDE)
+
+`targets/<perfil>/amenazas/threagile.yaml` describe el sistema **entero**: activos, datos,
+enlaces (protocolo · autenticación · autorización) y fronteras de confianza. Lo escribe el QA
+leyendo la arquitectura (el `DEPLOY.md`, el compose del proyecto, el diagrama del equipo), no el
+código. Threagile lo evalúa con 42 reglas, cada una con su letra STRIDE, y `make amenazas` deja
+`reports/<perfil>/amenazas/threagile.sarif` (el gate lo cuenta contra `MAX_THREAT_FINDINGS`,
+999 el día uno) más `amenazas.md` y el diagrama de flujo de datos.
+
+```bash
+cp targets/_template/amenazas/threagile.yaml targets/proyecto_x/amenazas/   # y reescríbelo
+docker run --rm threagile/threagile:0.9.1 -list-types          # vocabulario exacto de cada campo
+docker run --rm threagile/threagile:0.9.1 -explain-risk-rules  # qué busca cada regla
+make amenazas TARGET=proyecto_x
+```
+
+Tres cosas que importan: los `id:` son la clave de triaje de cada riesgo (estables, no se
+renombran a la ligera); un id inexistente, un tag fuera de `tags_available` o un valor fuera del
+vocabulario hacen que Threagile aborte (el goal lo dice, y no deja el resultado anterior como si
+fuera nuevo); y ninguna regla builtin es Repudiation — la **R** se declara en
+`individual_risk_categories` y se mide con la auditoría de AAA (4.9). Los riesgos se juzgan en la
+pestaña de triaje como los de cualquier escáner: una amenaza modelada sin control medido es un
+hallazgo, no una laguna.
+
+### 4.9 Los controles AAA: autenticación · autorización · auditoría
+
+Tres pilares, tres guiones, un comando. `make aaa` corre la MISMA suite de Playwright que
+`make e2e` (más el oráculo) y deja un SARIF por pilar en `reports/<perfil>/aaa/`; sustituye a
+`make e2e` cuando el perfil trae guiones AAA. Presupuesto 0 en los tres (`MAX_AUTHN_FINDINGS`,
+`MAX_AUTHZ_FINDINGS`, `MAX_ACCT_FINDINGS`): un control que falla no se administra por umbral.
+
+**Autenticación — `aaa/authn.json`.** Sondas *tipadas*: el motor (`lib/specs/authn.spec.ts`)
+sabe ejecutar cada tipo a través del adaptador del perfil, y el guion declara solo qué debe
+responder ESTE sistema. Tipos: `login-fallido` (contraseña mala: sin sesión, sin pistas),
+`refresh-como-access` (solo stacks con refresh), `logout-revoca` (necesita `LOGOUT_PATH` o una
+ruta fija del stack), `anonimo` (peticiones sin sesión), `peticion` (escape genérico, con o sin
+sesión), `limitador` (N intentos → 429; **destructiva**, solo con `AAA_DESTRUCTIVO=1`). `expect`
+admite `status`, `denegado` (401/403/404 o redirección a login, el criterio de la matriz),
+`body_has`, `body_lacks`, `header_has`. Una sonda que el stack no puede ejecutar consta como no
+aplicable. **Cuenta los logins**: un login crudo por rol y archivo (compartido) más uno fallido
+por sonda, junto a los dos de `auth-check` y los dos de la matriz — contra un limitador de 10 por
+minuto hay que poner `workers: 1` en `playwright.config.ts` y no duplicar sondas en los specs del
+perfil.
+
+**Autorización — `playwright/authz-matrix.json`.** La matriz de 4.4, sin cambios; ahora sus
+reglas llevan la etiqueta `[authz]` y suman a su propio artefacto. Vota dos veces a propósito: en
+`playwright` (¿la suite pasó?) y en `aaa-authz` (¿el control de acceso se sostiene?).
+
+**Auditoría — `aaa/acct.json`.** Eventos que deben dejar rastro (`login-fallido`, `login`,
+`logout`, o el id de una sonda `peticion`) y la consulta de SOLO LECTURA que lo comprueba; recibe
+`:'t0'` (instante anterior a la acción), `:'marker'` (el User-Agent sintético que envió la suite),
+`:'usuario'` y `:'rol'`. `"preset": "moodle"` carga `lib/aaa/presets/moodle.json`
+(`mdl_logstore_standard_log`); un stack propio escribe su SQL. Hace falta un rol de base de datos
+con `SELECT` sobre la tabla de auditoría y nada más:
+
+```sql
+CREATE ROLE seclab_ro LOGIN PASSWORD '...';
+GRANT CONNECT ON DATABASE "<db>" TO seclab_ro;
+GRANT USAGE ON SCHEMA public TO seclab_ro;
+GRANT SELECT ON <tabla_auditoria> TO seclab_ro;
+```
+
+y en `target.env.local`: `AAA_DB_URL=postgresql://seclab_ro:<pass>@127.0.0.1:<puerto>/<db>`.
+Sin él la auditoría sale `no-disponible` — el gate lo imprime en su propia línea y el informe lo
+advierte — porque **no medir no es aprobar**.
 
 ---
 
@@ -312,6 +382,8 @@ make budget      TARGET=proyecto_x
 make perf-jmeter TARGET=proyecto_x
 make build       TARGET=proyecto_x
 make image-scan  TARGET=proyecto_x IMAGE=mi-repo:tag
+make amenazas    TARGET=proyecto_x   # modelo de amenazas (STRIDE)
+make aaa         TARGET=proyecto_x   # AAA: sustituye a make e2e cuando hay guiones AAA
 ```
 
 `make all TARGET=proyecto_x` es `static` + `live`.
@@ -334,8 +406,12 @@ make image-scan  TARGET=proyecto_x IMAGE=mi-repo:tag
 | Artefacto móvil (APK/IPA) | MobSF | `make mobile-scan` | `mobile/mobsf.sarif` | no |
 | Contrato de API (Spectral) | Spectral | `make api-lint` | `api/spectral.sarif` | no |
 | Contrato vs implementación (Schemathesis) | Schemathesis | `make api-fuzz` | `api/schemathesis.xml` | **sí** |
+| Modelo de amenazas (STRIDE) | Threagile | `make amenazas` | `amenazas/threagile.sarif` · `amenazas/data-flow-diagram.png` | no |
 | Superficie runtime (DAST) | OWASP ZAP | `make dast` | `zap/zap.sarif` · `zap/zap-report.html` | **sí** |
 | Autorización y flujos (E2E) | Playwright | `make e2e` | `playwright/results.json` | **sí** |
+| AAA · autenticación | Playwright | `make aaa` | `aaa/authn.sarif` · `aaa/AAA.md` | **sí** |
+| AAA · autorización (matriz) | Playwright | `make aaa` | `aaa/authz.sarif` · `aaa/AAA.md` | **sí** |
+| AAA · auditoría (oráculo) | psql | `make aaa` | `aaa/acct.sarif` · `aaa/AAA.md` | **sí** |
 | Carga (k6) | k6 | `make perf` | `k6/summary.json` | **sí** |
 | Carga (JMeter) | JMeter | `make perf-jmeter` | `jmeter/results.jtl` | **sí** |
 | Flujos de usuario en navegador (MCP) | Playwright MCP | `make mcp-journey` | `mcp/journeys.md` | **sí** |
@@ -349,7 +425,7 @@ nada sobre autorización — nunca inició sesión. Esa es la dimensión de `e2e
 permisos — y con los tres en verde la pestaña del usuario puede seguir congelándose, porque el
 trabajo caro ocurre en el equipo del usuario. Rastrea el bundle entero, cuenta **megapíxeles
 descodificados** en vez de bytes y mide con la CPU frenada ×4. Umbrales en
-[`lib/specs/README-main-thread-budget.md`](lib/specs/README-main-thread-budget.md).
+[`lib/specs/README-main-thread-budget.md`](../lib/specs/README-main-thread-budget.md).
 
 ---
 
@@ -428,6 +504,36 @@ Lo que el laboratorio **no** hace por ti, y por tanto va en el informe escrito a
   eso no dice nada sobre el proyecto.
 
 ---
+
+### 7.1 Leer y juzgar los riesgos del modelo de amenazas y las sondas AAA
+
+Dónde se ve cada cosa, de más rápido a más completo:
+
+| Quiero… | Dónde |
+|---|---|
+| ver la lista y **juzgar** cada riesgo o sonda fallida | `make ui` → perfil → fila «Modelo de amenazas (STRIDE)» o «AAA · …» → **Ver y juzgar**. Cada fila trae severidad, la regla, y un mensaje que empieza por *qué es* y *qué hacer* |
+| una sola página con todo, sin servidor | `reports/<perfil>/index.html` (`make dashboard`): las mismas filas, con el veredicto del gate arriba |
+| la tabla de riesgos con su letra, activo y enlace, y qué significa cada categoría | `reports/<perfil>/amenazas/amenazas.md` (+ `data-flow-diagram.png`, el diagrama de flujo de datos que Threagile dibujó del modelo) |
+| qué sonda pasó, cuál falló y con qué evidencia (status por paso), y qué evento dejó rastro | `reports/<perfil>/aaa/AAA.md` |
+| el cruce letra × amenazas × fichas × controles, y los tres pilares con sus conteos | el informe (`make informe`): secciones «Modelo de amenazas (STRIDE)» y «AAA» |
+
+Cómo se lee un riesgo del modelo: el **mensaje** dice *qué es* (la condición de la arquitectura
+que la regla detectó) y *qué hacer* (la acción típica); la **ubicación** es el `synthetic_id`
+(`categoría@enlace@origen@destino`), que dice exactamente qué activo o enlace del modelo lo
+dispara; la **severidad** la gradúa Threagile por instancia (probabilidad × impacto × fuga de
+datos). Un riesgo se cierra de tres formas, y solo de tres: **corrigiendo el sistema** (y
+volviendo a evaluar, o midiendo el control con una sonda AAA que pase), **aceptándolo** con dueño,
+razón y fecha, o marcándolo **falso positivo** cuando el modelo estaba mal — y entonces se
+corrige el modelo. Hay un cuarto veredicto para el caso que el método persigue: **mitigado**,
+cuando la amenaza es real pero el control que la cubre se mide en cada corrida y hoy pasa (una
+sonda AAA, un evento del oráculo, una regla de la matriz); la nota tiene que nombrar esa medición.
+Quitar el activo del modelo para que el riesgo desaparezca es mentirse.
+
+Cómo se lee una sonda AAA: `pass` es un control que se sostiene; `fail` es un control que no
+está (y el mensaje dice qué paso respondió qué, frente a qué se esperaba); `no aplica` es una
+sonda que este stack no puede ejecutar (consta, no se cuenta); `no disponible` es una medición
+que no se hizo (típicamente la auditoría sin `AAA_DB_URL`), y no medir no es aprobar. Un `fail`
+tampoco se administra por umbral: se corrige, o se acepta en el triaje con la razón.
 
 ## 8. Entrega
 
@@ -517,6 +623,6 @@ de trabajo.
 
 ---
 
-*Diseño y decisiones: [`README.md`](README.md). Historial de hallazgos sobre la propia herramienta:
-[`INFORME_MIGRACION_SECURITY_LAB.md`](INFORME_MIGRACION_SECURITY_LAB.md) y
-[`INFORME_HARDENING_SECURITY_LAB.md`](INFORME_HARDENING_SECURITY_LAB.md).*
+*Diseño y decisiones: [`README.md`](../README.md). Historial de hallazgos sobre la propia herramienta:
+[`INFORME_MIGRACION_SECURITY_LAB.md`](historial/INFORME_MIGRACION_SECURITY_LAB.md) y
+[`INFORME_HARDENING_SECURITY_LAB.md`](historial/INFORME_HARDENING_SECURITY_LAB.md).*

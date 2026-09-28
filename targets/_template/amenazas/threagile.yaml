@@ -1,0 +1,199 @@
+# Modelo de amenazas del perfil — lo evalúa Threagile (`make amenazas TARGET=<perfil>`).
+#
+# COPIA Y REESCRIBE. Este es un ejemplo mínimo (un cliente, una API, una base) que Threagile
+# acepta tal cual; con él `make amenazas` mide el ejemplo, no tu sistema, y guion-check lo dirá.
+# Lo que hay que escribir es lo que solo se sabe conociendo la arquitectura: qué activos hay,
+# qué datos procesan y guardan, por qué enlaces se hablan (protocolo, autenticación,
+# autorización) y qué fronteras de confianza los separan. Vocabulario exacto:
+#   docker run --rm threagile/threagile:0.9.1 -list-types
+#   docker run --rm threagile/threagile:0.9.1 -explain-risk-rules
+# `internet: true` significa «vive en internet» (el navegador de la persona, un IdP ajeno), NO «está
+# expuesto»: el borde (nginx, balanceador) va con `internet: false`, o Threagile lo tratará como un
+# atacante que alcanza tu API. Los ids (`id:`) son la clave de triaje de cada riesgo: elígelos estables y no los renombres
+# a la ligera. Ninguna regla builtin es Repudiation: la R se declara en
+# individual_risk_categories y se MIDE con las sondas de auditoría (aaa/acct.json).
+threagile_version: 1.0.0
+title: __TARGET__ — modelo de amenazas (ejemplo de plantilla)
+date: 2026-01-01
+author:
+  name: QA SECURITY-LAB
+management_summary_comment: Ejemplo mínimo de la plantilla. Reescribir con la arquitectura real del proyecto.
+business_criticality: important
+business_overview:
+  description: Qué hace el sistema para quién.
+technical_overview:
+  description: Cliente web -> API -> base de datos, en un mismo host docker.
+questions:
+  ¿Cómo entra la gente en producción?: ""
+abuse_cases:
+  Credencial robada: Alguien usa la credencial de otra persona desde otro equipo.
+security_requirements:
+  Fail-closed: Sin identidad verificada no hay sesión.
+tags_available:
+  - docker
+data_assets:
+  Credenciales:
+    id: credenciales
+    description: Usuario y contraseña de las personas.
+    usage: business
+    tags:
+    origin: Personas usuarias
+    owner: Equipo del proyecto
+    quantity: many
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: important
+    justification_cia_rating: Abren la identidad completa.
+  Datos de negocio:
+    id: datos-negocio
+    description: Lo que el sistema gestiona.
+    usage: business
+    tags:
+    origin: Sistema
+    owner: Equipo del proyecto
+    quantity: many
+    confidentiality: confidential
+    integrity: critical
+    availability: important
+    justification_cia_rating: Su alteración tiene efecto sobre personas.
+technical_assets:
+  Navegador de la persona:
+    id: cliente
+    description: El cliente que usa una persona.
+    type: external-entity
+    usage: business
+    used_as_client_by_human: true
+    out_of_scope: false
+    justification_out_of_scope:
+    size: component
+    technology: browser
+    tags:
+    internet: true
+    machine: physical
+    encryption: none
+    owner: Personas usuarias
+    confidentiality: confidential
+    integrity: important
+    availability: important
+    justification_cia_rating: Ve datos de negocio y teclea credenciales.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - credenciales
+      - datos-negocio
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Uso de la API:
+        target: api
+        description: Login y operaciones de negocio.
+        protocol: https
+        authentication: credentials
+        authorization: enduser-identity-propagation
+        tags:
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - credenciales
+          - datos-negocio
+        data_assets_received:
+          - datos-negocio
+  API:
+    id: api
+    description: El servicio del proyecto.
+    type: process
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: service
+    technology: web-service-rest
+    tags:
+      - docker
+    internet: false
+    machine: container
+    encryption: none
+    owner: Equipo del proyecto
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: important
+    justification_cia_rating: Ve las credenciales y decide quién accede a qué.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: true
+    data_assets_processed:
+      - credenciales
+      - datos-negocio
+    data_assets_stored:
+    data_formats_accepted:
+      - json
+    communication_links:
+      Acceso a la base:
+        target: base-datos
+        description: Consultas y escrituras del servicio.
+        protocol: sql-access-protocol
+        authentication: credentials
+        authorization: technical-user
+        tags:
+        vpn: false
+        ip_filtered: false
+        readonly: false
+        usage: business
+        data_assets_sent:
+          - datos-negocio
+        data_assets_received:
+          - datos-negocio
+  Base de datos:
+    id: base-datos
+    description: Donde viven los datos de negocio y el registro de auditoría.
+    type: datastore
+    usage: business
+    used_as_client_by_human: false
+    out_of_scope: false
+    justification_out_of_scope:
+    size: component
+    technology: database
+    tags:
+      - docker
+    internet: false
+    machine: container
+    encryption: none
+    owner: Equipo del proyecto
+    confidentiality: strictly-confidential
+    integrity: critical
+    availability: important
+    justification_cia_rating: Guarda los datos y la prueba de quién hizo qué.
+    multi_tenant: false
+    redundant: false
+    custom_developed_parts: false
+    data_assets_processed:
+      - datos-negocio
+    data_assets_stored:
+      - datos-negocio
+    data_formats_accepted:
+    communication_links:
+trust_boundaries:
+  Red interna:
+    id: red-interna
+    description: La red docker del despliegue; solo la API está publicada.
+    type: network-virtual-lan
+    tags:
+    technical_assets_inside:
+      - api
+      - base-datos
+    trust_boundaries_nested:
+shared_runtimes:
+  Host docker:
+    id: host-docker
+    description: API y base en el mismo daemon.
+    tags:
+      - docker
+    technical_assets_running:
+      - api
+      - base-datos
+individual_risk_categories:
+risk_tracking:

@@ -82,6 +82,16 @@ def pasos(target: str) -> list[dict]:
         "el guion es el TECHO de la cobertura: con el ejemplo genérico se mide otro proyecto",
         bloquea=False)
 
+    # El modelo de amenazas es el único insumo que describe el sistema ENTERO, no una muestra: se
+    # escribe leyendo la arquitectura y se evalúa sin la aplicación viva. No bloquea: se puede
+    # correr el estático antes de modelar, pero se ve hasta que esté hecho.
+    add("amenazas", "Modelar las amenazas del sistema y evaluarlas (STRIDE)",
+        existe(rep, "amenazas", "threagile.sarif"),
+        f"make amenazas TARGET={target}   (escribir targets/{target}/amenazas/threagile.yaml)",
+        "una amenaza modelada sin control medido es un hallazgo, no una laguna; las letras STRIDE "
+        "salen de aquí, no de la prosa",
+        bloquea=False)
+
     add("doctor", "Preflight: docker, disco, memoria, puertos, umbrales",
         True, f"make doctor TARGET={target}",
         "atrapa lo que si no aparece a mitad de una corrida como un error ilegible", bloquea=False)
@@ -104,6 +114,16 @@ def pasos(target: str) -> list[dict]:
     add("dinamico", "Ejecutar las dimensiones vivas",
         existe(rep, "zap", "zap.sarif"), f"make live TARGET={target}",
         "ZAP, matriz de autorización y carga")
+
+    # Los tres pilares AAA miden los controles que el modelo de amenazas da por supuestos: qué
+    # responde el login (authn), qué alcanza cada rol (authz) y qué queda registrado (acct).
+    add("aaa", "Medir los controles AAA en vivo (autenticación · autorización · auditoría)",
+        existe(rep, "aaa", "authn.sarif") or existe(rep, "aaa", "authz.sarif"),
+        f"make aaa TARGET={target}   (aaa/authn.json, playwright/authz-matrix.json, aaa/acct.json; "
+        f"AAA_DB_URL en target.env.local para la auditoría)",
+        "una sonda que falla es un control que no está; un evento sin rastro es repudio: ninguno de "
+        "los dos se administra por presupuesto",
+        bloquea=False)
 
     add("triaje", "Juzgar los hallazgos",
         _hay_triaje(rep), "make ui   → pestaña de Triaje",

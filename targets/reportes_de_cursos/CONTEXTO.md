@@ -31,7 +31,7 @@ a k6/api-fuzz/zap el extra_host nginx.zajuna.com (Moodle valida HTTP_HOST).
   matriz (aprendiz sin `viewreports`), no un fallo — el adaptador lo trata así.
 - **nginx del core: se AÑADEN dos `location`, no se corre `install-nginx.sh`.** `/` es un CMS y
   Moodle vive bajo `/zajuna`; el script reescribiría el site y tumbaría el CMS y el despliegue de
-  #3. Ver `SECURITY-LAB/PUERTOS.md`.
+  #3. Ver `SECURITY-LAB/docs/PUERTOS.md`.
 
 ## Contra qué se está midiendo
 

@@ -37,7 +37,7 @@
 #              (stress_ramp, capacity_multiuser, import_stress…). Hoy las dos se pintan igual.
 #              Por eso el guion tiene que verse, con su alcance, junto a la dimensión.
 #   script_kind  qué ES ese archivo, para que se lea sin abrirlo:
-#              plan | script | specs | reglas | config
+#              plan | script | specs | reglas | config | modelo | sondas
 #   object     LO AUDITADO cuando no es el código: el binario firmado, una imagen construida, el
 #              documento OpenAPI. Ni ajuste ni guion — es el sujeto. Sin él la dimensión no
 #              tiene sobre qué operar, y eso es NO DISPONIBLE, no «sin hallazgos».
@@ -392,6 +392,37 @@
   needs: target-network
   runner: local
 
+# ---------------------------------------------------------------- amenazas (STRIDE)
+
+# El único artefacto del laboratorio que describe el SISTEMA y no una muestra de él: activos,
+# enlaces y fronteras de confianza escritos por una persona, y los riesgos que Threagile deriva
+# de ellos con sus reglas, cada una con su letra STRIDE. NO mide controles: eso lo hacen las
+# dimensiones aaa-*, que son otra pregunta («qué hace el sistema con la identidad») y no se
+# mezclan aquí. Una amenaza modelada sin control medido es un hallazgo, no una laguna; el
+# juicio queda en el triaje, como con cualquier escáner.
+- id: amenazas
+  label: Modelo de amenazas (STRIDE)
+  tool: Threagile
+  human: amenazas/data-flow-diagram.png
+  goal: amenazas
+  service: threagile
+  profile: threat
+  kind: findings
+  artifact: amenazas/threagile.sarif
+  inputs: 
+  script: amenazas/threagile.yaml
+  script_kind: modelo
+  object: 
+  gate: MAX_THREAT_FINDINGS
+  default: 999
+  live: false
+  triage: true
+  class: light
+  mem: 512m
+  measured: false
+  needs: source
+  runner: local
+
 # ---------------------------------------------------------------- runtime
 
 # mem 2g y measured: true — es el ÚNICO número medido de este archivo. Sale de
@@ -440,6 +471,85 @@
   triage: false
   class: browser
   mem: 4g
+  measured: false
+  needs: target-network
+  runner: local
+
+# ---------------------------------------------------------------- AAA (controles de identidad)
+
+# Tres pilares, tres guiones, tres artefactos y UN goal (`make aaa`): la misma suite de
+# Playwright de `e2e` corre las sondas de autenticación (lib/specs/authn.spec.ts lee
+# aaa/authn.json) y la matriz de autorización (lib/specs/authz-matrix.spec.ts), y un oráculo SQL
+# de solo lectura comprueba que lo que las sondas hicieron quedó REGISTRADO (aaa/acct.json).
+# `make aaa` sustituye a `make e2e` cuando el perfil trae guiones AAA. La matriz vota dos veces
+# a propósito: en `playwright` (¿la suite pasó?) y en `aaa-authz` (¿el control de acceso se
+# sostiene?). AAA_DB_URL va en `inputs` de la auditoría para que la ausencia del oráculo se
+# pinte NO DISPONIBLE, que no es «sin hallazgos».
+- id: aaa-authn
+  label: AAA · autenticación
+  tool: Playwright
+  human: aaa/AAA.md
+  goal: aaa
+  service: 
+  profile: 
+  kind: findings
+  artifact: aaa/authn.sarif
+  inputs: BASE_URL,AUTH_ADAPTER,ROLE_A_USER,ROLE_A_PASS
+  script: aaa/authn.json
+  script_kind: sondas
+  object: 
+  gate: MAX_AUTHN_FINDINGS
+  default: 0
+  live: true
+  triage: true
+  class: browser
+  mem: 4g
+  measured: false
+  needs: target-network
+  runner: local
+
+- id: aaa-authz
+  label: AAA · autorización (matriz)
+  tool: Playwright
+  human: aaa/AAA.md
+  goal: aaa
+  service: 
+  profile: 
+  kind: findings
+  artifact: aaa/authz.sarif
+  inputs: BASE_URL,AUTH_ADAPTER,ROLE_A_USER,ROLE_A_PASS,ROLE_B_USER,ROLE_B_PASS
+  script: playwright/authz-matrix.json
+  script_kind: reglas
+  object: 
+  gate: MAX_AUTHZ_FINDINGS
+  default: 0
+  live: true
+  triage: true
+  class: browser
+  mem: 4g
+  measured: false
+  needs: target-network
+  runner: local
+
+- id: aaa-acct
+  label: AAA · auditoría (oráculo)
+  tool: psql
+  human: aaa/AAA.md
+  goal: aaa
+  service: 
+  profile: 
+  kind: findings
+  artifact: aaa/acct.sarif
+  inputs: BASE_URL,AUTH_ADAPTER,ROLE_A_USER,ROLE_A_PASS,AAA_DB_URL
+  script: aaa/acct.json
+  script_kind: sondas
+  object: 
+  gate: MAX_ACCT_FINDINGS
+  default: 0
+  live: true
+  triage: true
+  class: light
+  mem: 256m
   measured: false
   needs: target-network
   runner: local

@@ -1,0 +1,35 @@
+{
+  "_doc": [
+    "Eventos de AUDITORÍA (pilar 3 de AAA): ¿lo que las sondas hicieron quedó REGISTRADO donde",
+    "la aplicación dice que registra? Lo comprueba tools/aaa-oracle.sh con una consulta de SOLO",
+    "LECTURA (AAA_DB_URL en target.env.local; vacía = no-disponible, nunca pass). Cada evento",
+    "referencia una `accion` que la suite ejecutó y anotó en playwright/aaa-acciones.json:",
+    "login-fallido, login, logout (las hace lib/specs/authn.spec.ts) o el id de una sonda de tipo",
+    "peticion. El SQL recibe :'t0' (instante ISO anterior a la acción), :'marker' (el User-Agent",
+    "sintético seclab-aaa-<accion>-<epoch> que la suite envió), :'usuario' y :'rol'. `preset`",
+    "carga lib/aaa/presets/<nombre>.json (p.ej. moodle: mdl_logstore_standard_log) y los eventos",
+    "de aquí se añaden o sobrescriben por id. Sustituye los <marcadores> por tu tabla real."
+  ],
+  "oraculo": { "tipo": "postgres", "url_env": "AAA_DB_URL" },
+  "preset": "",
+  "eventos": [
+    {
+      "id": "login-fallido-registrado",
+      "accion": "login-fallido",
+      "severidad": "medium",
+      "stride": "R",
+      "titulo": "un intento fallido deja rastro con su motivo",
+      "sql": "SELECT count(*) FROM <tabla_auditoria> WHERE <columna_tiempo> >= :'t0'::timestamptz AND <columna_estado> LIKE '<fallido>%'",
+      "expect_min": 1
+    },
+    {
+      "id": "login-registrado",
+      "accion": "login",
+      "severidad": "medium",
+      "stride": "R",
+      "titulo": "un login correcto queda atribuido a la cuenta",
+      "sql": "SELECT count(*) FROM <tabla_auditoria> WHERE <columna_tiempo> >= :'t0'::timestamptz AND <columna_usuario> = :'usuario'",
+      "expect_min": 1
+    }
+  ]
+}

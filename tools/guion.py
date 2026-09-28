@@ -33,6 +33,7 @@ operador —o un agente— sepa, sin abrir nada, si el guion cubre el sistema o 
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -40,6 +41,7 @@ import re
 UNIDAD = {
     "script": "peticiones", "plan": "peticiones", "specs": "pruebas",
     "reglas": "reglas", "config": "ajustes", "flujos": "flujos",
+    "modelo": "activos", "sondas": "sondas",
 }
 
 # Ruido que no es una ruta del sistema auditado.
@@ -101,6 +103,16 @@ def _medir(path: str, kind: str) -> tuple[int, list[str]]:
         # Cada formato nombra su unidad de otra forma. Se cuentan todas y se toma la que aplique;
         # medir un gitleaks.toml (TOML, [[rules]]) con el patron de un ruleset de Spectral (YAML)
         # daba cero y lo reportaba como "vacio" teniendo tres reglas propias.
+        # La matriz de autorización es un JSON que es una LISTA de reglas: se cuenta directo.
+        if path.endswith(".json"):
+            try:
+                doc = json.loads(texto)
+            except ValueError:
+                return 0, []
+            if isinstance(doc, list):
+                rutas = list(dict.fromkeys(r.get("path", "") for r in doc if isinstance(r, dict) and r.get("path")))
+                return len(doc), rutas[:8]
+            return 0, []
         toml_rules = len(re.findall(r"^\s*\[\[rules\]\]", texto, re.M))
         yaml_rules = len(re.findall(r"^\s*-\s*(?:id|rule|description):", texto, re.M))
         yaml_keys = len(re.findall(r"^\s{2,}[\w.-]+:\s*$", texto, re.M))
@@ -114,6 +126,37 @@ def _medir(path: str, kind: str) -> tuple[int, list[str]]:
         # cubre menos que uno con los ocho reales del sistema — la misma lógica que k6/Playwright.
         flujos = len(re.findall(r"^\s*[-*]\s+\*\*", texto, re.M)) or len(re.findall(r"\bF\d+\b", texto))
         return flujos, _rutas(texto)
+    if kind == "modelo":
+        # Threagile: la unidad es el ACTIVO TÉCNICO; lo que toca son sus ids y cuántos enlaces salen
+        # de ellos. Sin PyYAML (no es dependencia del laboratorio): se sigue el bloque de primer
+        # nivel y la indentación de 4 espacios de cada `id:`.
+        bloque, ids, enlaces = None, [], 0
+        for linea in texto.splitlines():
+            if re.match(r"^[a-z_]+:", linea):
+                bloque = linea.split(":", 1)[0]
+                continue
+            if bloque != "technical_assets":
+                continue
+            m = re.match(r"^ {4}id:\s*(\S+)", linea)
+            if m:
+                ids.append(m.group(1))
+            elif re.match(r"^\s+target:\s*\S+", linea):
+                enlaces += 1
+        return len(ids), ([f"{enlaces} enlaces"] if enlaces else []) + ids[:7]
+    if kind == "sondas":
+        # aaa/authn.json (sondas) y aaa/acct.json (eventos): la unidad es la sonda/el evento, y lo
+        # que toca son las rutas que sus pasos nombran.
+        try:
+            doc = json.loads(texto)
+        except ValueError:
+            return 0, []
+        items = (doc.get("sondas") or doc.get("eventos") or []) if isinstance(doc, dict) else []
+        rutas: list[str] = []
+        for s in items:
+            for p in [s.get("path")] + [q.get("path") for q in s.get("peticiones", []) if isinstance(q, dict)]:
+                if p and p not in rutas:
+                    rutas.append(p)
+        return len(items), rutas[:8]
     if kind == "config":
         return len(re.findall(r"^\s*[\w.-]+\s*[:=]", texto, re.M)), []
     return 0, []

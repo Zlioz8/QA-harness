@@ -46,7 +46,7 @@ class Dimension:
     inputs: str = ""      # claves de target.env que pide; "," = todas, "|" = una u otra
     script: str = ""      # EL GUION que interpreta la herramienta, bajo targets/<t>/. Puede
                           # llevar ${VAR}. Vacío = esta herramienta no lleva guion.
-    script_kind: str = "" # plan | script | specs | reglas | config
+    script_kind: str = "" # plan | script | specs | reglas | config | modelo | sondas
     object: str = ""      # la clave que apunta a LO AUDITADO cuando no es el código (APK, imagen,
                           # documento OpenAPI). Es el sujeto, no un ajuste.
     tool: str = ""        # nombre de la HERRAMIENTA; `label` describe la DIMENSIÓN
@@ -205,7 +205,7 @@ DOC_END = "<!-- dimensiones:fin -->"
 
 
 def markdown_table() -> str:
-    """La tabla de dimensiones para README.md y MANUAL_USO_QA.md.
+    """La tabla de dimensiones para README.md y docs/MANUAL_USO_QA.md.
 
     La documentación era la SÉPTIMA copia de esta lista, y estaba desactualizada como las otras:
     anunciaba `trufflehog.txt` como artefacto de la dimensión de secretos cuando el gate y el

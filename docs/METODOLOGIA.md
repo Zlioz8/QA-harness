@@ -52,6 +52,7 @@ Por eso hoy el laboratorio **se niega** en los tres puntos:
 | dar por buena una dimensión con guion genérico | `tools/guion-check.py` | el guion es el techo de la cobertura |
 | escribir un informe vacío como si fuera limpio | `tools/secrets.sh`, `make dast` | la ausencia de escaneo no es ausencia de hallazgos |
 | aprobar sin veredicto | `tools/gate.sh` | `skip` no es `PASS` |
+| dar por auditado un evento sin oráculo | `tools/aaa-oracle.sh` | «se registró» solo lo dice la tabla de auditoría, no el 200 de la respuesta |
 
 ## 3. Los insumos: qué te toca aportar a ti
 
@@ -88,6 +89,38 @@ La autorización es la única dimensión que ningún escáner cubre solo. **El l
 las cuentas**: si las fabrica él, la matriz mide un accesorio suyo — con los roles que él eligió —
 y no el control de acceso del sistema. Se piden al equipo. Si no las hay, la dimensión es NO
 DISPONIBLE, que no es «sin hallazgos».
+
+### El modelo de amenazas (STRIDE) es un insumo
+
+Es el único guion que describe el sistema **entero** y no una muestra de él: qué activos hay, qué
+datos procesan y guardan, por qué enlaces se hablan (protocolo, autenticación, autorización) y qué
+fronteras de confianza los separan. Se escribe **leyendo la arquitectura**, no el código, en
+`targets/<t>/amenazas/threagile.yaml`; Threagile lo evalúa con sus reglas, cada una con su letra
+STRIDE, y deja riesgos contables (`make amenazas`). Ninguna regla builtin es Repudiation: la R se
+declara en el modelo (`individual_risk_categories`) y se mide con la auditoría de AAA.
+
+Regla: **una amenaza modelada sin control medido es un hallazgo, no una laguna.** Se cierra con
+una sonda que pasa (veredicto `mitigado`, que nombra la medición), o con un juicio en el triaje
+con razón escrita — nunca borrándola del modelo.
+
+### Los tres pilares AAA tienen guion propio
+
+STRIDE dice *qué puede pasar*; AAA dice *qué hace el sistema con la identidad*, y son tres
+preguntas distintas con tres guiones distintos:
+
+- **Autenticación** (`aaa/authn.json`): qué debe responder el login y la sesión — una contraseña
+  incorrecta, un refresh usado como access, la credencial vieja tras cerrar sesión, la superficie
+  sin sesión, el limitador. El motor es genérico (`lib/specs/authn.spec.ts`) y entra por el
+  adaptador del perfil; el guion declara solo las expectativas de ESTE sistema.
+- **Autorización** (`playwright/authz-matrix.json`): la matriz que ya existía — qué rol alcanza
+  qué —, ahora con su propio artefacto y veredicto.
+- **Auditoría** (`aaa/acct.json`): qué evento debe dejar rastro y dónde. Lo comprueba un oráculo
+  de solo lectura contra la tabla de auditoría de la aplicación (`AAA_DB_URL`, en `.local`); sin él
+  la auditoría es NO DISPONIBLE, que no es «sin hallazgos».
+
+`make aaa` corre los tres y sustituye a `make e2e` cuando el perfil trae guiones AAA. Una sonda
+que este stack no puede ejecutar (sin refresh, sin logout) **consta** como no aplicable; no falla
+ni desaparece.
 
 ### Lo que el repositorio no trae
 
@@ -144,6 +177,34 @@ el informe enlaza cada ficha desde su hallazgo.
 Una honestidad que el paso preserva: cuando un marco NO aplica (un fallo de disponibilidad por error
 propio no tiene vector CVSS ni técnica ATT&CK; un riesgo de proceso no encaja en STRIDE), se DICE,
 en vez de forzar una casilla. Forzar el encaje enseñaría al equipo un mapeo falso.
+
+## 4.ter STRIDE: de la letra al artefacto
+
+Las seis letras dejan de ser prosa. Salen de tres sitios, y el informe los cruza en una tabla:
+
+| Fuente | Qué aporta la letra | Artefacto |
+|---|---|---|
+| Threagile sobre el modelo | una por REGLA (el mapa vive en `tools/threagile-sarif.py`) | `reports/<t>/amenazas/threagile.sarif` |
+| las sondas AAA | una opcional por sonda, declarada en el guion | `reports/<t>/aaa/aaa.json` |
+| las fichas `riesgos/<ID>.md` | la sección `## STRIDE` de cada hallazgo confirmado | el propio documento |
+
+Una letra con amenazas modeladas y sin sondas es un control que se da por supuesto; una letra
+con sondas y sin amenazas es una medición sin modelo detrás. Las dos cosas se ven en la matriz.
+
+## 4.quater AAA: del control a la sonda
+
+Un control de identidad no se describe: se **ejercita**. La sonda declara qué debe responder el
+sistema y el motor lo pide de verdad, con las credenciales que entregó el equipo, a través del
+adaptador. Tres consecuencias:
+
+- **Presupuesto 0.** Una sonda de autenticación que falla, una regla de la matriz que un rol
+  alcanza sin derecho, o un evento que no dejó rastro, son un control que no está. No se
+  administran por umbral: se corrigen, o se aceptan en el triaje con razón escrita.
+- **La auditoría necesita oráculo.** «Se registró» solo lo dice la tabla de auditoría, no el 200
+  de la respuesta. Sin `AAA_DB_URL` el pilar queda NO DISPONIBLE y el gate lo imprime aparte.
+- **El presupuesto de logins es real.** Un login crudo por rol y archivo, uno fallido por sonda;
+  contra un limitador (movil: 10 por minuto y por IP) eso es lo que cabe junto a `auth-check` y la
+  matriz. `E2E_PACE_MS` espacia; `workers: 1` en `playwright.config.ts` evita la carrera.
 
 ## 5. El entregable
 

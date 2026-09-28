@@ -1,0 +1,38 @@
+{
+  "_doc": [
+    "Preset de auditoría para un Moodle (o un plugin dentro de uno): el registro estándar",
+    "mdl_logstore_standard_log. Moodle NO guarda el User-Agent en el log, así que los eventos",
+    "se localizan por instante (:'t0', epoch en timecreated) y por cuenta (:'usuario' = username",
+    "de Moodle). Requiere que logstore_standard esté habilitado (admin/tool/log). Se usa con",
+    "\"preset\": \"moodle\" en aaa/acct.json; los eventos del perfil se añaden o sobrescriben por id."
+  ],
+  "eventos": [
+    {
+      "id": "login-fallido-registrado",
+      "accion": "login-fallido",
+      "severidad": "medium",
+      "stride": "R",
+      "titulo": "el intento fallido aparece como \\core\\event\\user_login_failed",
+      "sql": "SELECT count(*) FROM mdl_logstore_standard_log WHERE eventname = '\\core\\event\\user_login_failed' AND timecreated >= EXTRACT(EPOCH FROM :'t0'::timestamptz)::bigint AND other LIKE '%' || :'usuario' || '%'",
+      "expect_min": 1
+    },
+    {
+      "id": "login-registrado",
+      "accion": "login",
+      "severidad": "medium",
+      "stride": "R",
+      "titulo": "el login aparece como \\core\\event\\user_loggedin atribuido a la cuenta",
+      "sql": "SELECT count(*) FROM mdl_logstore_standard_log WHERE eventname = '\\core\\event\\user_loggedin' AND timecreated >= EXTRACT(EPOCH FROM :'t0'::timestamptz)::bigint AND userid = (SELECT id FROM mdl_user WHERE username = :'usuario' LIMIT 1)",
+      "expect_min": 1
+    },
+    {
+      "id": "logout-registrado",
+      "accion": "logout",
+      "severidad": "medium",
+      "stride": "R",
+      "titulo": "el cierre de sesión aparece como \\core\\event\\user_loggedout",
+      "sql": "SELECT count(*) FROM mdl_logstore_standard_log WHERE eventname = '\\core\\event\\user_loggedout' AND timecreated >= EXTRACT(EPOCH FROM :'t0'::timestamptz)::bigint AND userid = (SELECT id FROM mdl_user WHERE username = :'usuario' LIMIT 1)",
+      "expect_min": 1
+    }
+  ]
+}

@@ -59,6 +59,50 @@ los dumps de la USB**. Insumos presentes en la USB (`/media/zlioz/zlioz`):
 Procedimiento detallado: **`INFRALOCAL/MANUAL_UNIVERSAL_DESPLIEGUE.md`** y `INFRALOCAL/RESUMEN_MAESTRO.md`
 (ya existen). Ese manual es la fuente de verdad para levantar el core; este documento solo lo enmarca.
 
+## ANTIPLAGIO — migrado al harness (2026-08-31)
+
+El workspace `ANTIPLAGIO/` son **6,2 GB**, de los que solo ~700 KB son conocimiento. Repartido
+según las tres capas de arriba:
+
+| Qué | Tamaño | Dónde queda |
+|---|---|---|
+| Auditoría, contexto, despliegue, escenario (corpus + `cli/` + guion), entorno local | ~700 KB | **git**, en `targets/antiplagio/` |
+| Credenciales reales de local y preprod + token de Winston | — | `targets/antiplagio/target.env.local` (**gitignored**, USB) |
+| Capturas de evidencia (`*.png`) del escenario y las verificaciones | ~3 MB | **USB** / QA-entregables |
+| `04-pruebas-y-material/` (75 docx, 38 pdf, 215 log, 438 yml) | **5,8 GB** | **USB.** Nunca git |
+| `03-documentacion-proyecto/` (SARIF de Qodana, documentación heredada) | 459 MB | **USB** |
+| Escenario montado en el Moodle local (EV-A/B/C/W, BD) | — | **se reconstruye**: `escenario/cli/*.php` |
+
+Punto de entrada en el PC nuevo: **`targets/antiplagio/CONTEXTO.md`** (estado, decisiones y qué
+quedó abierto) y **`targets/antiplagio/hallazgos/orden.md`** (qué hacer primero). El detalle
+completo de la auditoría está en `hallazgos/auditoria-completa.md`.
+
+### Copiado a la USB el 2026-08-31
+
+Decisión del responsable: **en la USB va todo, credenciales incluidas.** No es lo mismo que git
+—ahí sigue pendiente decidir— pero la USB es soporte físico propio y se prioriza no perder nada.
+Guía de orientación escrita en `AUDITORIAS-QA-ZAJUNA/ANTIPLAGIO/LEEME-PRIMERO.md`.
+
+| Copiado | Detalle |
+|---|---|
+| Workspace `ANTIPLAGIO/` | La copia previa era del 28/08; se actualizó con todo lo del 31 |
+| `SECURITY-LAB/` | Incluye `targets/antiplagio/` completo **y** `target.env.local` |
+| `ANTIPLAGIO/_repo-codigo/antiplagio/` | El repo con su `.git`. **Destino real: `~/proyectos/antiplagio`**, no el workspace: de esa ruta depende el bind mount de `/etc/fstab` |
+| `..._repo-codigo/*.bundle` | Historial en un fichero, por si el `.git` sufre en exfat |
+| `..._repo-codigo/env-del-devops-b3957dd/` | Los 8 `.env` del commit huérfano, extraídos a texto plano |
+
+> **`b3957dd` es frágil y solo existe aquí.** Ninguna rama lo apunta (force-push sobre
+> `mq5preproduccion`), así que un `git gc` puede borrarlo y `git bundle --all` no lo empaqueta.
+> Contiene los `.env` con `WINSTON_TOKEN`, `DB_PASSWORD` y `OWNER_PASSWORD` reales. En el PC
+> nuevo: `git tag rescate-mq5-devops b3957dd` para que deje de ser huérfano.
+
+> **Espacio:** la USB quedó al 98 %. Hubo que vaciar `.Trash-1000` (761 MB) para que cupiera el
+> material de pruebas. El aviso de higiene de más abajo sigue vigente y ahora es urgente: para la
+> próxima migración hace falta un disco mayor.
+
+> Lo que **no** viaja y hay que aceptar: la sesión de Claude y su memoria. Por eso todo lo que
+> estaba solo ahí se volcó a `CONTEXTO.md`. Si algo importante no está en un `.md`, se pierde.
+
 ## Arranque en PC nuevo — checklist
 
 ```
@@ -66,6 +110,8 @@ Procedimiento detallado: **`INFRALOCAL/MANUAL_UNIVERSAL_DESPLIEGUE.md`** y `INFR
 2. Restaurar secretos:
    - ~/.ssh/id_ed25519_fsrisaralda (+ config)  [de la USB cifrada]
    - targets/*/target.env.local                 [de la USB]
+     (antiplagio incluido: sin él no hay cuentas de Moodle ni token de Winston.
+      La plantilla versionada targets/antiplagio/target.env.local.example dice qué rellenar)
 3. git clone https://github.com/Zlioz8/QA-harness.git SECURITY-LAB
    (y tu GitLab si añadiste espejo)
 4. git clone <QA-entregables> con LFS           [entregables, capa 2a]

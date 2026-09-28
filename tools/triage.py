@@ -76,6 +76,18 @@ VERDICT_INFO = {
         "gate": "aparte",
         "exige": ("nota", "dueno"),
     },
+    "mitigado": {
+        "label": "Mitigado (control medido)",
+        "ayuda": "Real, y el control que lo cubre se MIDE en cada corrida y hoy pasa (una sonda AAA, "
+                 "un oráculo, una regla de la matriz). No es un falso positivo: la amenaza existe; "
+                 "es un control que se sostiene.",
+        # Descuenta como el falso positivo, pero por la razón contraria: la herramienta acertó y el
+        # sistema responde. La nota tiene que nombrar QUÉ medición lo cubre; sin ella, «mitigado»
+        # es «aceptado» sin dueño. Es el cierre que el método pide para una amenaza modelada: se
+        # cierra con una sonda que pasa, nunca borrándola del modelo.
+        "gate": "descuenta",
+        "exige": ("nota",),
+    },
 }
 
 VERDICTS = tuple(VERDICT_INFO)
