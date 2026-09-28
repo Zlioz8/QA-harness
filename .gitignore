@@ -95,3 +95,6 @@ baselines/perfil-*/
 *.bak-*
 *.antes-*
 *.orig
+
+# Copias completas del repositorio (git bundle): llevan TODA la historia, secretos incluidos.
+*.bundle
