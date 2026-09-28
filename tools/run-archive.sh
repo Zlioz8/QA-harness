@@ -26,7 +26,10 @@ ENVFILE="targets/$TARGET/target.env"
 
 [ -d "$R" ] || { echo "run-archive: nothing at $R"; exit 2; }
 
-SRC_PATH=$(src_path_of)
+# SRC_PATH del perfil (el .local gana). Antes llamaba a src_path_of, que resolvía un SRC_PATH
+# relativo a un SRC_ROOT por máquina y nunca llegó a la rama principal: el override .local cumple
+# esa función hoy.
+SRC_PATH=$(envget SRC_PATH)
 commit=$(git -C "${SRC_PATH:-.}" rev-parse --short HEAD 2>/dev/null || echo nocommit)
 STAMP="$(date +%Y%m%d-%H%M%S)-${commit}"
 DEST="$R/runs/$STAMP"

@@ -121,6 +121,38 @@ else
   echo "        SonarQube run is futile until the filesystem drops below 90%."
 fi
 
+# ---- credenciales reales: que no se puedan publicar ---------------------------------------------
+# target.env se versiona — es el contrato entre el laboratorio y el proyecto — y uno de los dos
+# remotos es PÚBLICO. Eso solo es seguro mientras las cuentas del contrato sean de laboratorio.
+# Un perfil con cuentas REALES lo declara (CREDS_ARE_REAL=yes) y este control lo hace cumplir:
+# o el perfil entero está ignorado (movil), o los valores reales viven SOLO en target.env.local
+# y el contrato los deja vacíos. Olvidarlo una vez es irreversible: un push escribe la credencial
+# en la historia para siempre (pasó: una contraseña real de un proyecto auditado quedó en el
+# espejo público citada en un hallazgo, y hubo que reescribir historia el 2026-09-28).
+# (Recuperado del trabajo previo al rebase del 2026-08-19 y adaptado al override .local.)
+CREDS_ARE_REAL=$(envget CREDS_ARE_REAL)
+case "${CREDS_ARE_REAL:-no}" in
+  yes|true|1)
+    if git check-ignore -q "$ENVFILE" 2>/dev/null; then
+      ok "CREDS_ARE_REAL=yes y el perfil entero está fuera de git"
+    else
+      # Solo el CONTRATO, sin el .local: lo que se publicaría.
+      # Umbrales (ALLOW_*, MAX_*) no son secretos aunque nombren SECRETS.
+      reales=$(grep -E '^[A-Z0-9_]*(PASS|PASSWORD|SECRET|TOKEN)[A-Z0-9_]*=.+' "$ENVFILE" 2>/dev/null \
+               | grep -vE '^(ALLOW|MAX)_' | cut -d= -f1 | tr '\n' ' ')
+      if [ -n "$reales" ]; then
+        bad "CREDS_ARE_REAL=yes y $ENVFILE (versionado) trae valores en: $reales"
+        echo "        Muévelos a targets/$TARGET/target.env.local y deja la clave vacía en el contrato."
+      else
+        ok "CREDS_ARE_REAL=yes y el contrato versionado no trae valores secretos (viven en .local)"
+      fi
+    fi ;;
+  *)
+    # No es un fallo: la mayoría de los perfiles usan cuentas de laboratorio. Pero se dice en voz
+    # alta, porque el valor por defecto equivocado aquí es el que no se puede deshacer.
+    ok "credenciales declaradas de laboratorio (CREDS_ARE_REAL=${CREDS_ARE_REAL:-vacío}): el contrato es publicable" ;;
+esac
+
 # ---- memory ---------------------------------------------------------------------------------
 # Added after a run froze the operator's desktop for ~21 minutes (PSI full stall) and the kernel
 # OOM-killed VSCode and Chrome — not the tools. The lab's heavy dimensions are servers and JVMs

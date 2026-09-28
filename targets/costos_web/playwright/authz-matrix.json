@@ -71,5 +71,13 @@
       "A"
     ],
     "note": "area administrativa"
+  },
+  {
+    "path": "/api/seguimiento-formularios/exportar-reporte",
+    "method": "GET",
+    "allow": [
+      "A"
+    ],
+    "note": "exportación del reporte de seguimiento: solo administración (recuperada del trabajo previo al rebase del 2026-08-19)"
   }
 ]

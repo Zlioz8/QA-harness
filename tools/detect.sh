@@ -112,6 +112,27 @@ if [ -n "$CAPCFG" ] || [ -n "$(scan -type f -name 'ionic.config.json' | head -1)
 fi
 [ -n "$(scan -type f -name go.mod | head -1)" ] && RECIPES+=(go-binary)
 
+# Plain PHP behind Apache: an index.php at the root plus an .htaccess doing the routing, with
+# no framework marker. This is the most repeated stack in the factory and detection fell
+# straight through it — ADI came out as LANGS=php, AUTH_ADAPTER=none and no recipe at all,
+# which reads as "nothing to run" when in fact everything is there.
+#
+# Checked LAST, so a framework that happens to ship an .htaccess (Laravel's public/ does) has
+# already claimed the tree above. (Recuperado del trabajo previo al rebase del 2026-08-19: la
+# receta recipes/php-apache y el adaptador php-form sí llegaron a la rama; esta detección no.)
+if [ "${#RECIPES[@]}" -eq 0 ] && [ "$N_PHP" -gt 0 ] \
+   && [ -f "$SRC/index.php" ] && [ -f "$SRC/.htaccess" ]; then
+  RECIPES+=(php-apache); ADAPTER=php-form
+  add_note "Plain PHP served by Apache (index.php + .htaccess, no framework marker). recipes/php-apache brings it up."
+  # The single most expensive misconfiguration for this stack, and it fails in a way that looks
+  # like something else: without AllowOverride All, Apache ignores .htaccess, the site 404s on
+  # every page AND .env becomes downloadable with every password in it. The recipe sets it; say
+  # so here because whoever reads this output is the person who would otherwise debug the 404s.
+  add_note "php-apache sets AllowOverride All: without it Apache ignores .htaccess — 404 everywhere AND .env served in clear."
+  grep -rqls 'password_verify\|session_start' "$SRC" --include='*.php' 2>/dev/null \
+    && add_note "Form login detected (session_start/password_verify). Set LOGIN_PATH and the field names for the php-form adapter."
+fi
+
 # --- services the project already declares: reuse, do not reinvent ---
 while IFS= read -r c; do
   [ -z "$c" ] && continue
