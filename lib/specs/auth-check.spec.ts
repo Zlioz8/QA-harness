@@ -44,8 +44,13 @@ test.describe('credenciales entregadas por el operador QA', () => {
       // El adaptador lanza si el login falla; llegar aquí ya es la prueba. Se comprueba además
       // que la sesión SIRVE para algo: un adaptador puede devolver un contexto con una cookie
       // que el servidor no reconoce, y entonces todo lo posterior da 302 al login sin decir nada.
-      const res = await ctx.get('/');
-      expect(res.status(), `El rol ${role} inició sesión pero su sesión no vale: GET / devolvió ` +
+      // Qué se pide para comprobar que la sesión vale lo dice el perfil (AUTH_CHECK_PATH): una
+      // API JSON no tiene raíz que responda —la de Zajuna Móvil da 404 en `/` y tiene
+      // `/auth/validate` para exactamente esta pregunta—; una web con sesión de cookie sí la
+      // tiene. Sin declararlo, `/`, que es lo que servía a los proyectos con formulario.
+      const comprobacion = (process.env.AUTH_CHECK_PATH || '/').trim() || '/';
+      const res = await ctx.get(/^https?:\/\//.test(comprobacion) ? comprobacion : `${process.env.BASE_URL || ''}${comprobacion}`);
+      expect(res.status(), `El rol ${role} inició sesión pero su sesión no vale: GET ${comprobacion} devolvió ` +
         `${res.status()}. Suele ser una cuenta suspendida, sin matrícula, o forzada a cambiar ` +
         `la contraseña en el primer acceso.`).toBeLessThan(400);
     });
