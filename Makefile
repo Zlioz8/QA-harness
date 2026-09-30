@@ -39,7 +39,7 @@ guard:
 
 .PHONY: budget help list new siguiente brief guiones detect ingest-deploy doctor guard require-live require-auth clone up down purge status gate riesgos dashboard informe run-manifest doc-check ui ui-stop ui-logs \
         sonar qodana semgrep secrets deps config-scan image-scan sbom mobile-scan static \
-        build dast perf perf-jmeter e2e device-e2e live all api-lint api-fuzz mcp-journey require-mcp \
+        build dast perf perf-jmeter perf-escalera capacidad e2e device-e2e live all api-lint api-fuzz mcp-journey require-mcp \
         amenazas aaa
 
 help:             ##[admin] show this list, grouped by what each goal needs
@@ -224,6 +224,18 @@ perf-jmeter: guard require-live ##[live] load with an existing JMeter .jmx plan 
 	@rm -rf $(REPORTS)/jmeter/results.jtl $(REPORTS)/jmeter/html
 	@tools/run-dimension.sh "$(TARGET)" jmeter
 	@echo "JMeter report: $(REPORTS)/jmeter/html/index.html"
+
+perf-escalera: guard require-live ##[live] escalera de carga: sube por pasos y para en el primero que incumple el SLO
+	@# No sustituye a `perf` (una corrida, un veredicto): la envuelve. Cada paso es la dimensión
+	@# k6 con la telemetría del sistema alrededor; queda en $(REPORTS)/k6/runs/. La escalera la
+	@# declara el perfil en carga/<ESCALERA>.env — sin ella no hay nada que subir.
+	@test -f targets/$(TARGET)/carga/$${ESCALERA:-escalera}.env \
+	  || { echo "no hay targets/$(TARGET)/carga/$${ESCALERA:-escalera}.env — la escalera la declara el perfil."; \
+	       echo "NO DISPONIBLE para este perfil (que no es lo mismo que 'sin hallazgos')."; exit 2; }
+	@tools/perf-escalera.sh "$(TARGET)" "$${ESCALERA:-escalera}"
+
+capacidad: guard  ##[admin] de la última escalera a CAPACIDAD.md: rodilla, quiebre, recurso saturado, costo unitario
+	@tools/perf-capacidad.py informe "$(TARGET)" $(if $(CORRIDA),--corrida "$(CORRIDA)",)
 
 api-lint: guard   ##[code] Spectral: is the OpenAPI description itself sound
 	@# The spec is part of the repository, so this needs no running app. Absent spec = the

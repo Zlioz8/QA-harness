@@ -1,0 +1,7 @@
+{
+  "_nota": "Escenarios de demanda para `make capacidad`. Cada uno declara su fuente: medido, publicado (con enlace y fecha) o supuesto. Usa `usuarios_concurrentes` o los cuatro factores (poblacion, adopcion, activos_diarios, concurrencia_pico).",
+  "objetivo_utilizacion": 0.6,
+  "escenarios": [
+    { "nombre": "por cada 1.000 personas a la vez", "usuarios_concurrentes": 1000, "fuente": "unidad de cuenta, no un escenario" }
+  ]
+}

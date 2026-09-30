@@ -50,7 +50,8 @@ SECURITY-LAB/
   lib/specs/             pruebas genéricas que hereda todo proyecto (cabeceras, matriz de autorización,
                          presupuesto del hilo principal)
   lib/semgrep/           reglas SAST propias del laboratorio, por pila (laravel-vue.yml)
-  lib/k6/                sesión compartida para los scripts de carga
+  lib/k6/                sesión compartida (session.js) y forma de la carga, cuentas por usuario
+                         virtual y detalle por endpoint (carga.js)
   lib/aaa/presets/       eventos de auditoría por stack (moodle: mdl_logstore_standard_log)
   configs/               la llave de despliegue de `make clone` (deploy_key, no versionada)
   baselines/             instantáneas «antes de»: de plataforma (moodle-*: código + dump, solo el
@@ -283,6 +284,25 @@ El límite de Qodana es de licencia, no del laboratorio: JetBrains solo publica 
 pago y exige `QODANA_TOKEN`. Sin él la dimensión se reporta **`NO DISPONIBLE`, con la razón** —
 nunca como aprobada— y la calidad de ese proyecto la cubren SonarQube y semgrep, que sí son
 agnósticos.
+
+### Carga y capacidad (`make perf-escalera` · `make capacidad`)
+
+`make perf` es una corrida y un veredicto. La capacidad —cuánta gente, qué se satura primero,
+cuánto recurso por usuario— sale de una **escalera** con telemetría:
+
+```bash
+make perf-escalera TARGET=<proyecto>    # sube por pasos (carga/escalera.env), para en el primero que incumple
+make capacidad     TARGET=<proyecto>    # reports/<proyecto>/k6/CAPACIDAD.md
+```
+
+Cada paso es la dimensión `k6` de siempre, con `tools/perf-telemetria.sh` muestreando el sistema
+bajo prueba (contenedores por cgroup, procesos del host, conexiones de PostgreSQL) sin pedirle
+credenciales. `tools/perf-capacidad.py` lee la escalera y marca cada cifra como medida,
+extrapolada o supuesta. El método y sus trampas: `docs/METODOLOGIA.md` §4.quinquies; lo que
+aporta el perfil: `docs/MANUAL_USO_QA.md` §4.10.
+
+El generador está fijado (`K6_IMAGE`, `grafana/k6:2.2.0`): dos cifras solo son comparables si
+las produjo la misma versión.
 
 ### Presupuesto del hilo principal (`make budget`)
 

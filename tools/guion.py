@@ -89,8 +89,30 @@ def _medir(path: str, kind: str) -> tuple[int, list[str]]:
         # (`authedGet`/`authedPost`), que son la forma RECOMENDADA de pedir con la sesión ya
         # montada: un script que solo usa el ayudante medía cero y se reportaba "vacío" teniendo
         # ocho peticiones reales (medido en reportes_de_cursos).
+        #
+        # Y sigue los imports RELATIVOS del guion (`from './modelo.js'`): un guion de carga serio
+        # separa el modelo (qué pide la aplicación) de la forma (cuánta carga), y el archivo que
+        # elige K6_SCRIPT puede no tener ni una petición escrita. Medido en `movil` el 2026-09-30:
+        # smoke.js delegaba en modelo.js y se reportaba "vacío" con veinte peticiones reales.
+        # También cuenta los ayudantes de lib/k6/carga.js: `pedir(…)` y cada entrada de `lote([…])`.
+        vistos, cola, textos = {os.path.abspath(path)}, [path], []
+        while cola:
+            actual = cola.pop()
+            try:
+                t = open(actual, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            textos.append(t)
+            for rel in re.findall(r"""from\s+['"](\.{1,2}/[^'"]+)['"]""", t):
+                sig = os.path.abspath(os.path.join(os.path.dirname(actual), rel))
+                if sig not in vistos and os.path.isfile(sig):
+                    vistos.add(sig)
+                    cola.append(sig)
+        texto = "\n".join(textos)
         n = len(re.findall(r"\bhttp\.(get|post|put|patch|del|request)\b", texto))
         n += len(re.findall(r"\bauthed(?:Get|Post|Put|Patch|Delete)\s*\(", texto))
+        n += len(re.findall(r"\bpedir\s*\(\s*['\"]", texto))
+        n += len(re.findall(r"\[\s*['\"](?:GET|POST|PUT|PATCH|DELETE)['\"]\s*,", texto))
         return n, _rutas(texto)
     if kind == "plan":
         if path.endswith(".jmx"):    # JMeter

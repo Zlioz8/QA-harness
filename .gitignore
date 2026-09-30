@@ -25,7 +25,15 @@ node_modules/
 # personal passwords) because that stack has no synthetic accounts to test authorization with.
 # Publishing them is irreversible: a push to a hosted remote writes them into history for good.
 # Rule: a profile whose ROLE_A_/ROLE_B_ are real accounts stays out of the repository.
-targets/movil/
+targets/movil/*
+# …salvo el MODELO DE CARGA. Los guiones de k6 y la escalera describen cómo usa la app una
+# persona y a qué ritmo: no llevan cuentas (las leen de k6/datos/, que sí se excluye) y son lo
+# único del perfil que no se puede reconstruir desde el código auditado. Sin esto, el modelo
+# contra el que se dimensiona la infraestructura vivía en una sola máquina (L1 de su CONTEXTO).
+!targets/movil/k6/
+!targets/movil/carga/
+targets/*/k6/datos/
+targets/*/carga/grabacion/
 
 # La otra mitad de esa misma regla. Un perfil no nace con cuentas reales: `costos_web` empezó
 # con localhost y cuentas sembradas, y se volvió peligroso el día que se le apuntó al despliegue
@@ -98,3 +106,4 @@ baselines/perfil-*/
 
 # Copias completas del repositorio (git bundle): llevan TODA la historia, secretos incluidos.
 *.bundle
+targets/*/carga/.silencio-parados

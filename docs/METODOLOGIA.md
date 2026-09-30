@@ -206,6 +206,59 @@ adaptador. Tres consecuencias:
   contra un limitador (movil: 10 por minuto y por IP) eso es lo que cabe junto a `auth-check` y la
   matriz. `E2E_PACE_MS` espacia; `workers: 1` en `playwright.config.ts` evita la carrera.
 
+## 4.quinquies Carga y capacidad: de «un p95» a una afirmación
+
+`make perf` responde una pregunta pequeña: *¿esta corrida cumple el umbral?* La pregunta que
+llega de fuera es otra —*¿cuánta gente aguanta, qué se rompe primero y qué hay que comprar o
+arreglar?*— y un número suelto no la contesta. La contestan tres cosas juntas:
+
+```bash
+make perf-escalera TARGET=<proyecto>     # sube por pasos; para en el primero que incumple
+make capacidad     TARGET=<proyecto>     # rodilla, quiebre, recurso saturado, costo unitario
+tools/perf-capacidad.py comparar <corrida-A> <corrida-B>    # antes y después de un cambio
+```
+
+**La regla de evidencia.** Fuente directa es el código en su commit, el sistema corriendo y una
+medición con su comando. Un README, un informe anterior o un umbral heredado son hipótesis. Una
+prueba de carga vieja también: `summary.json` no dice contra qué commit ni qué despliegue midió,
+y el veredicto la cuenta igual. Antes de citar una corrida, mira su sello
+(`reports/<t>/.provenance/k6.json`) y su fecha; si no tiene sello, no es evidencia de hoy.
+
+**El modelo sale de tráfico real, no de un documento.** Lo que la aplicación pide de verdad está
+en el log del proxy de un despliegue que alguien usó. De ahí salen las secuencias por pantalla y
+el ritmo; el perfil guarda el extractor junto al modelo (en `movil`, `carga/grabacion.py`). Lo
+que ese tráfico NO da es la mezcla de una población: si lo generó un probador, la mezcla es un
+supuesto y se escribe como tal, dentro del guion.
+
+**Cinco errores que fabrican un número bonito**, todos medidos aquí:
+
+- *Una cuenta para todos los usuarios virtuales.* El backend cachea por persona y la prueba mide
+  la caché. → una cuenta por usuario virtual (`k6/datos/cuentas.json`, nunca versionado).
+- *Una IP para todos.* Entra el límite por IP y se mide el muro. → `CARGA_IPS=por-vu` contra un
+  despliegue propio que confíe en ese salto de proxy; o se deja a propósito y se lee como lo que
+  es: un aula detrás de un NAT.
+- *Juzgar con la rampa dentro.* Durante la rampa la concurrencia aún no es la del paso. → el SLO
+  se juzga en la meseta (`detalle.json`, campo `meseta`).
+- *Iniciar sesión dentro de la carga.* El login es raro en el uso real y suele estar limitado. →
+  las sesiones se abren en `setup()`; el login tiene su propia prueba.
+- *Medir con la máquina ocupada.* Generador y sistema comparten host: cualquier otra cosa que
+  corra entra en la cifra. → se para lo ajeno, y `perf-capacidad` avisa si el host entero pasó
+  del 85 % de CPU: ese paso describe el equipo, no la aplicación.
+
+**La telemetría es lo que convierte el quiebre en un diagnóstico.** El perfil declara qué se mira
+(`PERF_WATCH_CONTAINERS`, `PERF_WATCH_PROCS`) y cuál es el techo de cada pieza (`PERF_TECHOS`),
+leído de su configuración efectiva: un proceso de un solo hilo tiene techo en un núcleo aunque el
+contenedor tenga cuatro. Sin techos declarados el informe dice «recurso limitante: no atribuido»,
+y eso también es un resultado: el cuello está en algo que no se mira.
+
+**Tres marcas, y no se promueve ninguna.** Cada cifra de `CAPACIDAD.md` es *medida*, *extrapolada*
+(proyección lineal desde el costo unitario) o *supuesta* (la demanda). Una escalera en un solo
+sobre no demuestra cómo escala el sistema al añadir recursos: para eso se repite con otro sobre y
+se ajusta la curva (`perf-capacidad.py curva`).
+
+**Lo que una escalera no puede decir.** Nada de lo que el perfil no vigila; nada de un servidor
+que no sea el medido; y nada sobre la demanda real, que llega de fuera.
+
 ## 5. El entregable
 
 `make informe TARGET=<proyecto>` produce

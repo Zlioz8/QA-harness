@@ -1,0 +1,24 @@
+# El SOBRE de la prueba: con qué recursos y en qué configuración corre la API mientras se mide.
+# Es un override del compose de movil_api; NO edita nada de ese repositorio ni su .env.
+# Lo aplica y lo retira carga/sobre.sh.
+#
+#   SOBRE_CPUS / SOBRE_MEM   límites del contenedor (por omisión, los PERF_CPUS/PERF_MEM del perfil)
+#   SOBRE_WORKERS            procesos de uvicorn. uvicorn lee WEB_CONCURRENCY por sí mismo: no hace
+#                            falta tocar el comando de arranque (Dockerfile:223).
+#   SOBRE_LOG_LEVEL / SOBRE_DEBUG   INFO / False son los valores por omisión del repositorio
+#                            (.env.example:105-106), es decir, lo que corre un despliegue que lo siga.
+#                            El .env LOCAL de esta máquina tiene DEBUG: medir con él sería medir el
+#                            modo de desarrollo.
+#   PROXY_HOPS=2             el generador pone la IP de cada usuario virtual en X-Forwarded-For y
+#                            nginx añade la suya: con dos saltos el backend toma la del usuario
+#                            (app/utils/red.py:94-110). SOLO para la prueba: en un despliegue real
+#                            dejaría que cualquiera eligiera su IP.
+services:
+  web:
+    cpus: ${SOBRE_CPUS:-4}
+    mem_limit: ${SOBRE_MEM:-1536m}
+    environment:
+      - PROXY_HOPS=2
+      - LOG_LEVEL=${SOBRE_LOG_LEVEL:-INFO}
+      - DEBUG=${SOBRE_DEBUG:-False}
+      - WEB_CONCURRENCY=${SOBRE_WORKERS:-1}

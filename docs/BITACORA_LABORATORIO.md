@@ -1005,3 +1005,87 @@ alinear los timestamps a la ventana reciente y dejar el gate sin el aviso de eda
 resultado (mismo código, mismos SHAs). No es un defecto del laboratorio: el gate hizo exactamente lo
 que debe (avisar de un desfase de edad); se documenta el porqué del desfase para que no se lea como
 que se mezclaron dos despliegues.
+
+## L-R9-01 — La corrida de carga de julio contaba en el veredicto de `movil` sin sello ni commit
+
+**Ronda:** #9, 2026-09-30.
+
+**Qué pasó.** `reports/movil/k6/summary.json` era del 2026-07-28 (8 usuarios virtuales con UNA
+cuenta, dos endpoints, 30 s), no tenía sello en `.provenance/` y `tools/gate.sh` lo juzgaba igual
+que uno de hoy: `PASS k6 p95`. Dos meses de cambios del backend después (caché por persona,
+panel, complemento 1.4.x), ese archivo no describía nada, y el gate lo decía en verde.
+
+**Por qué.** El bloque k6 del gate (`gate.sh:278-311`) no llama a `stale_check` ni mira la
+procedencia; solo lee el JSON. Y `summary.json` no lleva dentro contra qué se midió.
+
+**Qué se hizo.** La corrida se movió a `reports/movil/k6/runs/20260728-obsoleta/` con un LEEME
+que dice por qué no vale, y el perfil corrió de nuevo con sello. Regla que queda escrita en
+METODOLOGIA §4.quinquies: una corrida de carga sin sello no es evidencia. El gate sigue sin
+comprobar la edad del k6: pendiente, con verificación propia.
+
+## L-R9-02 — `docker logs` se detiene en silencio en un json-log roto por un apagón
+
+**Ronda:** #9, 2026-09-30.
+
+**Qué pasó.** `docker logs movil_api-web-1` (lectura completa, o con `--since`) terminaba el
+2026-09-28 a las 13:30, mientras `--tail 8` mostraba líneas de hoy. La máquina se había apagado
+de golpe el 28; el archivo json del contenedor quedó con una entrada rota, y la lectura hacia
+delante se para ahí **sin ningún error**. `--since` (que lee hacia delante) devolvía vacío para
+una ventana en la que sí hubo tráfico.
+
+**Consecuencia.** Cualquier herramienta que recoja el log de un contenedor con `--since` puede
+traer nada y presentarlo como «sin actividad». Aquí afectaba a la telemetría de carga
+(`perf-telemetria.sh` guarda el log de la ventana de la corrida) y al extractor de tráfico
+real del perfil.
+
+**Qué se hizo.** `targets/movil/carga/grabacion.py` lee las dos mitades (hacia delante hasta el
+punto roto, y la cola hasta el mayor tamaño que aún llega a hoy) y las une. Para las corridas,
+los contenedores bajo prueba se recrean al poner el sobre (`carga/sobre.sh`), así que su log
+nace limpio. Si un contenedor NO se recrea, hay que comprobar que `docker logs --since` de
+verdad trae líneas antes de creer un log vacío.
+
+## L-R9-03 — `guion.py` medía «vacío» un guion de carga que delega en un modelo
+
+**Ronda:** #9, 2026-09-30.
+
+**Qué pasó.** `targets/movil/k6/smoke.js` pasó a importar sus gestos de `modelo.js` y el brief lo
+marcó `[vacío] — Y HAY ARTEFACTO EN DISCO`: el contador solo miraba el archivo que nombra
+`K6_SCRIPT` y buscaba `http.get`/`authedGet`. Un guion serio separa el modelo (qué pide la
+aplicación) de la forma (cuánta carga) y el archivo de entrada puede no tener ni una petición.
+
+**Qué se hizo.** `tools/guion.py` sigue los imports relativos del guion y cuenta también
+`pedir(…)` y cada entrada de `lote([…])` de `lib/k6/carga.js`.
+
+## L-R9-04 — Un trabajo de otro proyecto ocupaba medio núcleo de la base de Moodle durante la medición
+
+**Ronda:** #9, 2026-09-30.
+
+**Qué pasó.** Con seis usuarios virtuales, el grupo de procesos del PostgreSQL de Moodle marcaba
+51 % de CPU de media y 80 % de pico. No era la app: `calificaciones-mongo.service` (un timer de
+systemd del Centro de Calificaciones, cada diez minutos, siete de trabajo) lee esa base, y
+`calif_mongo` estaba al 72 % de CPU. En una escalera larga habría coincidido con algunos pasos
+y no con otros, y la curva habría tenido escalones que no son de la aplicación.
+
+**Qué se hizo.** `targets/movil/carga/silencio.sh` para lo ajeno (contenedores de otros
+perfiles y ese timer), apunta qué paró y lo devuelve al terminar. Regla en METODOLOGIA: la
+máquina en silencio, y `perf-capacidad.py` avisa si el host entero pasa del 85 % de CPU en un
+paso. El cron de Moodle no se para: en un servidor real también corre.
+
+## L-R9-05 — PRUEBAS DE CARGA/: qué se rescató y por qué se borró el resto
+
+**Ronda:** #9, 2026-09-30.
+
+La carpeta `PRUEBAS DE CARGA/` de la carpeta madre (555 MB, sin git) contenía un kit para medir si
+PgBouncer ayuda a Moodle con login por formulario web, un volcado real de la base de producción
+con datos personales, un bundle y un zip duplicados, y una contraseña de base de datos en un
+`.md`. Llegó a 10 usuarios virtuales y el propio kit admitía que no había punto de quiebre: sus
+cifras no se usan para nada.
+
+Lo que entró al laboratorio, reescrito: la escalera con regla de avance
+(`tools/perf-escalera.sh`), el evaluador de SLO (`tools/perf-capacidad.py paso`), los monitores
+de sistema y de PostgreSQL (`tools/perf-muestreo.py`, sin credenciales), la siembra de usuarios
+sintéticos por la API de Moodle (`targets/movil/carga/sembrar-usuarios.php`) y la idea de
+declarar los límites de la medición (sección «Lo que este informe NO dice» de CAPACIDAD.md).
+La pregunta del kit —¿hace falta un pooler delante del PostgreSQL de Moodle?— queda como
+candidata de infraestructura a medir con carga real. La carpeta se borró entera por decisión
+del dueño.

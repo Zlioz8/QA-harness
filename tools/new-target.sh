@@ -5,7 +5,8 @@ NAME="${1:?usage: new-target.sh <name>}"
 DST="targets/$NAME"
 [ -e "$DST" ] && { echo "ERROR: $DST already exists"; exit 1; }
 cp -r targets/_template "$DST"
-sed -i "s/__TARGET__/$NAME/g" "$DST/target.env" "$DST/sonar-project.properties"
+sed -i "s/__TARGET__/$NAME/g" "$DST/target.env" "$DST/sonar-project.properties" \
+  "$DST/k6/smoke.js" "$DST/carga/escalera.env"
 mkdir -p "reports/$NAME"
 cat <<EOF
 created $DST

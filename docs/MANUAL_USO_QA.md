@@ -285,6 +285,8 @@ E2E_PACE_MS=1200
 | Carga | `k6/<script>.js`; el perfil elige cuál con `K6_SCRIPT=` | usa `smoke.js` |
 | E2E / authz | `playwright/playwright.config.ts` + `playwright/authz-matrix.json` (+ `playwright/tests/`) | dimensión no probada |
 | Carga con plan propio | `jmeter/plan.jmx` (o `JMETER_PLAN=`) | `NO DISPONIBLE` |
+| Escalera de carga | `carga/escalera.env` (pasos, forma y SLO) y, para una persona por usuario virtual, `k6/datos/cuentas.json` | `NO DISPONIBLE` |
+| Capacidad | `PERF_WATCH_*` y `PERF_TECHOS` en `target.env`; `carga/demanda.json` para dimensionar | sin telemetría el cuello no se atribuye; sin demanda no se dimensiona |
 | Contrato de API | `OPENAPI_SPEC=` / `OPENAPI_SPEC_URL=` en `target.env` | `NO DISPONIBLE` |
 | Build de producción | servicio `front-build` (o `BUILD_SERVICE=`) en `compose.runtime.yml` | `NO DISPONIBLE` |
 | Modelo de amenazas (STRIDE) | `amenazas/threagile.yaml` | `NO DISPONIBLE` |
@@ -362,6 +364,38 @@ Sin él la auditoría sale `no-disponible` — el gate lo imprime en su propia l
 advierte — porque **no medir no es aprobar**.
 
 ---
+
+### 4.10 Carga y capacidad
+
+`make perf` corre UN guion y da un veredicto. Para saber cuánta gente aguanta el sistema y qué
+se satura primero hacen falta la escalera y la telemetría (el porqué, en
+`docs/METODOLOGIA.md` §4.quinquies):
+
+```bash
+make perf-escalera TARGET=proyecto_x                  # carga/escalera.env
+make perf-escalera TARGET=proyecto_x ESCALERA=humo    # carga/humo.env: dos pasos cortos, para probar el instrumento
+make capacidad     TARGET=proyecto_x                  # CAPACIDAD.md de la última escalera
+make capacidad     TARGET=proyecto_x CORRIDA=reports/proyecto_x/k6/runs/<corrida>
+```
+
+Qué declara el perfil:
+
+| Dónde | Qué | Para qué |
+|---|---|---|
+| `carga/<nombre>.env` | `ESCALERA_PASOS`, `ESCALERA_TIPO`, `ESCALERA_RAMPA/MESETA`, `ESCALERA_SCRIPT`, `SLO_*` | la escalera |
+| `k6/<guion>.js` | importa `/seclab-lib/carga.js` (`opciones`, `pedir`, `lote`, `resumen`) | la forma de la carga y el `detalle.json` por endpoint |
+| `k6/datos/cuentas.json` | `[{"usuario","clave","rol"}]`, no versionado | una persona por usuario virtual |
+| `target.env` | `PERF_WATCH_CONTAINERS`, `PERF_WATCH_PROCS`, `PERF_LOG_CONTAINERS`, `PERF_TECHOS`, `PERF_WATCH_PG` | qué se mira y cuál es el techo de cada pieza |
+| `carga/hook-antes.sh`, `carga/hook-despues.sh` | opcionales, se ejecutan alrededor de cada paso | medidas propias del proyecto (crecimiento de tablas, llamadas a un tercero) |
+| `carga/demanda.json` | escenarios de concurrencia, cada uno con su `fuente` | la tabla de recursos por escenario |
+
+Qué queda en `reports/<perfil>/k6/runs/<corrida>/`: `RUN.json` (contra qué y en qué sobre,
+leído del sistema), `escalera.csv`, y por paso `summary.json`, `detalle.json`, `paso.json`,
+`telemetria/*.csv`, `logs/` y `sello.json`. El último paso que cumple se copia a
+`k6/summary.json`, que es lo que leen `make gate`, el tablero y el informe.
+
+Antes de fiarte de una escalera, corre el control negativo: una con `SLO_P95_MS=1`. Si no se
+detiene en el primer paso, el instrumento no sabe fallar.
 
 ## 5. Ejecutar la auditoría
 

@@ -1,0 +1,16 @@
+{
+  "_nota": "Escenarios de demanda de Zajuna Móvil. Concurrentes = poblacion × adopcion × activos_diarios × concurrencia_pico. Cada factor lleva su marca: medido (con el comando), publicado (con la fuente y la fecha) o supuesto. La cifra nacional es una proyección; lo único medido del país son las poblaciones publicadas.",
+  "objetivo_utilizacion": 0.6,
+  "factores": {
+    "adopcion": { "valor": 0.5, "marca": "supuesto", "que_es": "parte de las personas con curso que usan la app en vez de la web; no hay analítica de la app todavía" },
+    "activos_diarios": { "valor": 0.3, "marca": "supuesto acotado por la muestra", "que_es": "parte de la población que entra un día de pico. En el Moodle local (capacitación, 3.776 personas en 2024-04) el día más cargado tuvo 1.275 activos = 34 %; la mediana de los días, 3 %" },
+    "concurrencia_pico": { "valor": 0.12, "marca": "medido en la muestra local", "que_es": "personas con actividad en la misma ventana de 5 minutos, en el pico del día, dividido por los activos del día: 10,9 a 13,2 % en los ocho días más cargados de 2024-04 y 2025-08 (mdl_logstore_standard_log, origin web/ws)" }
+  },
+  "escenarios": [
+    { "nombre": "por cada 1.000 personas a la vez", "usuarios_concurrentes": 1000, "fuente": "unidad de cuenta, no un escenario" },
+    { "nombre": "una regional: 20.000 personas con curso", "poblacion": 20000, "adopcion": 0.5, "activos_diarios": 0.3, "concurrencia_pico": 0.12, "fuente": "supuesto: población del tamaño del Moodle local (20.167 cuentas vivas, medido con SQL el 2026-09-30)" },
+    { "nombre": "formación titulada virtual", "poblacion": 160000, "adopcion": 0.5, "activos_diarios": 0.3, "concurrencia_pico": 0.12, "fuente": "publicado: más de 81.000 matriculados en modalidad virtual en 2024 (El Tiempo, citando al SENA) × 2 años de duración típica de un programa (supuesto)" },
+    { "nombre": "toda la formación titulada", "poblacion": 1314108, "adopcion": 0.5, "activos_diarios": 0.3, "concurrencia_pico": 0.12, "fuente": "publicado: 1.314.108 cupos de formación titulada en 2021 (SENA, Reporte de datos 2022 de la formación integral para el trabajo, p. 26)" },
+    { "nombre": "pico nacional: titulada más complementaria virtual", "poblacion": 4114108, "adopcion": 0.5, "activos_diarios": 0.3, "concurrencia_pico": 0.12, "fuente": "publicado: 1.314.108 cupos de titulada (2021) + 2,8 millones de cupos virtuales anunciados (bogota.gov.co citando al SENA); supuesto fuerte: los cursos cortos no están activos todo el año" }
+  ]
+}

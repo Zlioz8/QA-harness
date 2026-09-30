@@ -394,7 +394,12 @@ services:
   # system under test, which is the thing that carries declared resource limits.
   k6:
     profiles: ["perf"]
-    image: grafana/k6:latest
+    # FIJADA, ya no `latest`. Una cifra de carga solo es comparable con otra si las produjo el
+    # mismo generador: con `latest` la etiqueta avanza sola entre dos corridas y el cambio de
+    # versión se lee como un cambio del sistema medido. v2.2.0 es la que resolvía `latest` en
+    # esta máquina el 2026-09-30 (`docker run grafana/k6:latest version`). Subirla es un cambio
+    # con verificación propia: `make perf` de un perfil y comparar el summary.json.
+    image: ${K6_IMAGE:-grafana/k6:2.2.0}
     # The grafana/k6 image runs as uid 12345; the reports directory is pre-created by the host
     # user (see the Makefile guard), so an unprivileged k6 cannot write its --summary-export and
     # the run dies with "permission denied". Run as root like the other tool containers (trivy,
@@ -423,6 +428,27 @@ services:
       # marca 100% de error y se confunde con un fallo de la app. Playwright lo tolera solo; k6 no.
       # Campo que llena el target: K6_INSECURE_SKIP_TLS_VERIFY=true cuando el host es autofirmado.
       K6_INSECURE_SKIP_TLS_VERIFY: ${K6_INSECURE_SKIP_TLS_VERIFY:-false}
+      # Forma de la carga (lib/k6/carga.js). El env_file de arriba ya trae lo que declare el
+      # perfil; estas claves existen para que tools/perf-escalera.sh cambie el paso desde el
+      # shell sin editar el perfil —el entorno del shell gana sobre --env-file en la
+      # interpolación—. Vacías no significan nada: los guiones las tratan como no definidas.
+      CARGA_TIPO: ${CARGA_TIPO:-}
+      CARGA_VUS: ${CARGA_VUS:-}
+      CARGA_RAMPA: ${CARGA_RAMPA:-}
+      CARGA_MESETA: ${CARGA_MESETA:-}
+      CARGA_BAJADA: ${CARGA_BAJADA:-}
+      CARGA_MODELO: ${CARGA_MODELO:-}
+      CARGA_TASA: ${CARGA_TASA:-}
+      CARGA_PASOS: ${CARGA_PASOS:-}
+      CARGA_ITER: ${CARGA_ITER:-}
+      CARGA_IPS: ${CARGA_IPS:-}
+      CARGA_RUN: ${CARGA_RUN:-}
+      CARGA_ABORTA: ${CARGA_ABORTA:-}
+      CARGA_MEZCLA: ${CARGA_MEZCLA:-}
+      K6_P95_MS: ${K6_P95_MS:-}
+      K6_P99_MS: ${K6_P99_MS:-}
+      K6_ERR_RATE: ${K6_ERR_RATE:-}
+      K6_CHECKS_MIN: ${K6_CHECKS_MIN:-}
     volumes:
       - ./targets/${TARGET_NAME}/k6:/scripts:ro
       # NEVER mount at /lib: that is the container's own library directory. Shadowing it removes
