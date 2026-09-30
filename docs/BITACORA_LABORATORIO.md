@@ -1089,3 +1089,24 @@ declarar los límites de la medición (sección «Lo que este informe NO dice» 
 La pregunta del kit —¿hace falta un pooler delante del PostgreSQL de Moodle?— queda como
 candidata de infraestructura a medir con carga real. La carpeta se borró entera por decisión
 del dueño.
+
+## L-R9-06 — El teléfono real como instrumento: cada petición con su tiempo en el teléfono, en el servidor y en la red
+
+**Ronda:** #9, 2026-09-30.
+
+**Qué faltaba.** La escalera mide en el generador; la persona mide en su teléfono, con su red. La app
+ya ponía un `X-Request-Id` en cada petición y lo escribía en la consola del WebView al salir, pero no
+al volver: se sabía cuándo salía cada petición, no cuánto tardaba desde el teléfono.
+
+**Qué se hizo.** La app del destino `local` escribe también el fin (`[trace] <rid> fin <ms> <estado>
+<ms_servidor>`, con el `X-Execution-Time-Ms` que el backend ya enviaba). `targets/movil/carga/telefono.js`
+lee esa consola por CDP mientras conduce en el DOM real los mismos gestos del modelo de carga, y
+`telefono-bajo-carga.sh` lo hace en la meseta de cada paso de una escalera. Resultado medido el mismo
+día: con el servidor libre, 42 ms de red de ida y vuelta por petición en la Wi-Fi del laboratorio; a
+200 personas con un proceso, el p95 del teléfono pasa de 204 a 442 ms y aparece la primera petición de
+más de 1,5 s.
+
+**Trampa medida.** El volcado del log de nginx por paso (`docker logs --since`) traía peticiones del
+paso ANTERIOR: el contenedor de nginx era viejo y su json-log tenía la entrada rota de L-R9-02. Desde
+hoy `sobre.sh poner` recrea también nginx, y los análisis por paso (hook, animación) se recortan a la
+ventana `[inicio − 90 s, inicio + duración]` que k6 deja en `detalle.json`.

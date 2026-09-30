@@ -33,6 +33,9 @@ esperar() {
 case "${1:-ver}" in
   poner)
     ( cd "$API" && docker compose -f docker-compose.yml -f "$AQUI/sobre.compose.yml" up -d --no-deps web ) || exit 1
+    # nginx también se recrea: un json-log viejo con una entrada rota hace que `docker logs
+    # --since` devuelva de más (L-R9-02), y la telemetría guarda ese log por paso.
+    ( cd "$API" && docker compose up -d --no-deps --force-recreate nginx ) >/dev/null 2>&1
     # nginx resolvió `web` al arrancar: si el contenedor nuevo cambió de IP, responde 502 hasta recargar.
     esperar || { ( cd "$API" && docker compose restart nginx ); esperar || { echo "sobre: la API no responde en $BASE/health" >&2; exit 1; }; }
     ver ;;

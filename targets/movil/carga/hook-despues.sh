@@ -27,6 +27,8 @@ if [ -f "$DIR/logs/movil_api-nginx-1.log" ] && [ -f "$DIR/logs/movil_api-web-1.l
   mkdir -p "$DIR/grab"
   cp "$DIR/logs/movil_api-nginx-1.log" "$DIR/grab/proxy.log"
   cp "$DIR/logs/movil_api-web-1.log" "$DIR/grab/backend.log"
-  python3 "$AQUI/grabacion.py" analizar "$DIR/grab" --ua k6-carga >/dev/null 2>"$DIR/grab/error.txt" || true
+  # Solo la ventana del paso (el volcado del proxy puede traer pasos anteriores, L-R9-02).
+  VENTANA=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); i=d.get('inicio_s'); print(f\"{i-90} {i+(d.get('duracion_ms') or 0)/1000+5}\" if i else '')" "$DIR/detalle.json" 2>/dev/null)
+  python3 "$AQUI/grabacion.py" analizar "$DIR/grab" --ua k6-carga ${VENTANA:+--ventana $VENTANA} >/dev/null 2>"$DIR/grab/error.txt" || true
   rm -f "$DIR/grab/proxy.log" "$DIR/grab/backend.log" "$DIR/grab/peticiones.csv"
 fi

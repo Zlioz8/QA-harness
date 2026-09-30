@@ -120,6 +120,8 @@ def analizar(a):
             continue
         if a.hasta and t.strftime("%Y-%m-%d") > a.hasta:
             continue
+        if a.ventana and not (a.ventana[0] <= t.timestamp() <= a.ventana[1]):
+            continue
         if a.ua and a.ua not in ua:
             continue
         if not ruta.startswith(PREFIJO):
@@ -250,6 +252,7 @@ def main():
     n.add_argument("--hasta")
     n.add_argument("--ua", help="solo peticiones cuyo agente de usuario contenga este texto")
     n.add_argument("--hueco", type=float, default=2.0, help="segundos que separan dos gestos")
+    n.add_argument("--ventana", type=float, nargs=2, metavar=("DESDE", "HASTA"), help="solo peticiones entre estos dos instantes (epoch, segundos)")
     n.set_defaults(f=analizar)
     a = ap.parse_args()
     return a.f(a)

@@ -38,6 +38,34 @@ make perf-escalera TARGET=movil ESCALERA=aula           # 40 personas detrás de
 make perf-escalera TARGET=movil ESCALERA=resistencia    # dos horas a carga media
 ```
 
+## 2b. El teléfono real, de extremo a extremo
+
+La app del destino `local` escribe en la consola del WebView una línea por petición al salir y otra
+al volver (`[trace] <rid> fin <ms> <estado> <ms_servidor>`, `movil/src/main.ts`). `telefono.sh` la
+lee por CDP mientras conduce los gestos del modelo en el DOM real, y deja por petición: tiempo en el
+teléfono, tiempo del servidor (`X-Execution-Time-Ms`) y, por diferencia, la red.
+
+```bash
+export ANDROID_SERIAL=<serie>                            # con ADB inalámbrico el mismo teléfono sale dos veces
+targets/movil/carga/telefono.sh reports/movil/telefono/<fecha>/reposo   # servidor libre, 3 vueltas
+targets/movil/carga/telefono-bajo-carga.sh 1proc "100 200"              # la escalera en segundo plano y el teléfono en cada meseta
+python3 targets/movil/carga/telefono-resumen.py reports/movil/telefono/<fecha>   # la tabla: qué sintió la persona
+```
+
+El teléfono tiene que estar en la red del backend (hotspot `10.42.0.1`), con la app `io.ionic.starter.local`
+instalada y `WEBVIEW_DEBUG=true` (destino `local`). La cuenta es la de aprendiz del perfil (ROLE_B).
+
+## 2c. La animación
+
+```bash
+TELEFONO=reports/movil/telefono/<fecha>/reposo targets/movil/carga/animacion-armar.sh reports/movil/animacion/animacion.html \
+  "reports/movil/k6/runs/<corrida>/00200vus:1 proceso · 200 personas" "…"
+```
+
+`animacion.html` es un solo archivo: se abre en cualquier navegador. Cada número sale de los logs y la
+telemetría de la corrida (`animacion-datos.py`); lo único dibujado es la posición de cada paquete dentro
+de su segundo.
+
 ## 3. Restaurar
 
 ```bash
@@ -58,6 +86,8 @@ sudo -u www-data php targets/movil/carga/sembrar-usuarios.php --moodle=/var/www/
 | `*.env` | las escaleras |
 | `hook-antes.sh`, `hook-despues.sh`, `tablas.sh` | lo que la API escribe en su base por petición, y las llamadas a Moodle por ruta |
 | `demanda.json` | los escenarios de demanda, cada uno con su fuente |
+| `telefono.sh`, `telefono.js`, `telefono-bajo-carga.sh`, `telefono-resumen.py` | el teléfono real como instrumento: recorridos por CDP y cada petición vista desde el teléfono |
+| `animacion-datos.py`, `animacion.html`, `animacion-armar.sh` | la animación de cómo se acumulan los retrasos, armada con los registros de una corrida |
 
 ## Rehacer el modelo cuando cambie la app
 
