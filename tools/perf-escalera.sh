@@ -113,6 +113,20 @@ echo "perf-escalera: $TARGET · $TIPO · pasos: $PASOS · rampa $RAMPA, meseta $
 echo "               SLO: p95 ≤ ${SLO_P95} ms${SLO_P99:+, p99 ≤ ${SLO_P99} ms}, error ≤ ${SLO_ERR}${SLO_CHK:+, checks ≥ ${SLO_CHK}}"
 echo "               corrida: $DIR"
 
+# Si a esta escalera la matan desde fuera (un límite de tiempo del proceso que la lanzó, un Ctrl-C),
+# el muestreador de telemetría seguiría escribiendo para siempre. Medido el 2026-09-30: una
+# resistencia de dos horas cerró k6 bien y el proceso padre murió justo después, con el muestreo
+# vivo. Se para lo que esté abierto y se dice qué paso quedó sin cerrar.
+PASO_ABIERTO=""
+cerrar() {
+  if [ -n "$PASO_ABIERTO" ]; then
+    tools/perf-telemetria.sh stop "$TARGET" "$PASO_ABIERTO" 2>/dev/null
+    echo "perf-escalera: interrumpida con el paso $PASO_ABIERTO abierto — sin veredicto. Ver $DIR" >&2
+  fi
+}
+trap 'cerrar; exit 130' INT TERM
+trap 'cerrar' EXIT
+
 HOOK_ANTES="targets/$TARGET/carga/hook-antes.sh"
 HOOK_DESPUES="targets/$TARGET/carga/hook-despues.sh"
 ULTIMO_OK=""; ULTIMO=""; PRIMER_FALLO=""; EXTRA=0; ANTERIOR=0
@@ -124,6 +138,7 @@ for VUS in $PASOS; do
   rm -f "$REP/summary.json" "$REP/detalle.json"
   [ -x "$HOOK_ANTES" ] && "$HOOK_ANTES" "$PD" "$VUS" >"$PD/hook-antes.log" 2>&1
 
+  PASO_ABIERTO="$PD"
   tools/perf-telemetria.sh start "$TARGET" "$PD"
   echo
   echo "── paso $VUS usuarios ──────────────────────────────────────────────────────────"
@@ -133,6 +148,7 @@ for VUS in $PASOS; do
     tools/run-dimension.sh "$TARGET" k6 >"$PD/k6.log" 2>&1
   RC=$?
   tools/perf-telemetria.sh stop "$TARGET" "$PD"
+  PASO_ABIERTO=""
   tail -4 "$PD/k6.log" | sed 's/^/  /'
 
   # El código de salida de k6 NO decide: sale 99 cuando cruza un umbral, que es justo el dato que
