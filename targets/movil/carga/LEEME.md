@@ -52,7 +52,7 @@ targets/movil/carga/telefono-bajo-carga.sh 1proc "100 200"              # la esc
 python3 targets/movil/carga/telefono-resumen.py reports/movil/telefono/<fecha>   # la tabla: qué sintió la persona
 ```
 
-El teléfono tiene que estar en la red del backend (hotspot `10.42.0.1`), con la app `io.ionic.starter.local`
+El teléfono tiene que estar en la red desde la que se alcanza `BASE_URL` (el hotspot del equipo de pruebas), con la app `io.ionic.starter.local`
 instalada y `WEBVIEW_DEBUG=true` (destino `local`). La cuenta es la de aprendiz del perfil (ROLE_B).
 
 ## 2c. La animación

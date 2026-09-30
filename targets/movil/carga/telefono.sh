@@ -7,7 +7,7 @@
 #   carga/telefono.sh <salida> dom                             vuelca qué hay en pantalla (para escribir recorridos)
 #
 # Solo para el destino LOCAL de la app (WEBVIEW_DEBUG=true). El teléfono tiene que estar en la
-# red del backend (hotspot 10.42.0.1) y con la app instalada.
+# red desde la que se alcanza BASE_URL (el hotspot del equipo de pruebas) y con la app instalada.
 set -uo pipefail
 SALIDA="${1:?uso: telefono.sh <salida> [recorridos|dom] [repeticiones]}"
 RECORRIDOS="${2:-arranque,inicio,cursos,curso,calificaciones,calendario,notificaciones}"
