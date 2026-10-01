@@ -70,10 +70,13 @@ Para ver **qué cambió** entre dos corridas del mismo escenario, se pasan las d
 y el lado tras una barra; la animación las empareja y las dibuja a la vez, con el mismo reloj:
 
 ```bash
-PROCESOS=2 EXTRAS=reports/movil/animacion/fase0-extras.json targets/movil/carga/animacion-armar.sh reports/movil/animacion/animacion-fase0.html \
+PROCESOS=2 EXTRAS=reports/movil/animacion/antes-despues-extras.json targets/movil/carga/animacion-armar.sh reports/movil/animacion/animacion-antes-despues.html \
   "reports/movil/k6/runs/<antes>/00200vus:Aula de 200 personas detrás de una IP|antes" \
   "reports/movil/k6/runs/<después>/00200vus:Aula de 200 personas detrás de una IP|despues"
 ```
+
+Es **una sola animación** por perfil: el «antes» es la primera medición y no se toca; cuando el código
+cambia, se rearma apuntando el «después» a la corrida nueva. Sin niveles intermedios.
 
 En ese modo se ven moverse las respuestas 429 (rebotan en nginx), las filas hacia la base de la API y
 las líneas de log por segundo. `EXTRAS` es un JSON `[{medida, antes, despues, fuente}]` con lo medido
