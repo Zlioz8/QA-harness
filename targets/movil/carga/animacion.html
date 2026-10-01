@@ -18,13 +18,18 @@
   .leyenda { font-size:11px; color:var(--gris); max-width:1280px; line-height:1.5; }
   .leyenda b { color:var(--tinta); }
   .k { display:inline-block; width:10px; height:10px; vertical-align:middle; margin-right:4px; border:1px solid #000; }
+  #extras table { border-collapse:collapse; margin-top:6px; }
+  #extras th, #extras td { border:1px solid var(--borde); padding:3px 8px; text-align:left; }
+  #extras td.antes { color:var(--ambar); } #extras td.despues { color:var(--verde); }
 </style>
 </head>
 <body>
 <h1>Zajuna Móvil bajo carga · cómo se acumulan los retrasos</h1>
-<div class="sub" id="sub">Cada número de la pantalla sale de una corrida real del laboratorio (SECURITY-LAB, 2026-09-30).</div>
+<div class="sub" id="sub">Cada número de la pantalla sale de una corrida real del laboratorio (SECURITY-LAB).</div>
 <div class="barra">
-  <label>Corrida <select id="corrida"></select></label>
+  <button id="comparar" hidden>⇄ antes / después</button>
+  <label id="lpareja" hidden>Escenario <select id="pareja"></select></label>
+  <label id="lcorrida">Corrida <select id="corrida"></select></label>
   <button id="play" class="activo">⏸ pausa</button>
   <label>Velocidad <select id="vel"><option value="0.5">0,5×</option><option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option><option value="10">10×</option></select></label>
   <input id="scrub" type="range" min="0" max="100" value="0">
@@ -33,7 +38,9 @@
 </div>
 <canvas id="c" width="640" height="360"></canvas>
 <div class="leyenda" id="leyenda"></div>
+<div class="leyenda" id="extras"></div>
 <script id="datos" type="application/json">/*DATOS*/</script>
+<script id="otras" type="application/json">/*EXTRAS*/</script>
 <script>
 (() => {
 const DATOS = JSON.parse(document.getElementById('datos').textContent);
@@ -41,9 +48,16 @@ const c = document.getElementById('c'); const g = c.getContext('2d'); g.imageSmo
 const W = c.width, H = c.height;
 const P = { fondo:'#0e1322', tinta:'#e6edf3', gris:'#8892a6', verde:'#5df08a', ambar:'#ffcc4d', rojo:'#ff5c5c', azul:'#5cc3ff', lila:'#c58cff', naranja:'#ff9a3c', panel:'#151b2b', borde:'#2a3550', oscuro:'#0b0f1a', carril:'#25314f' };
 const sel = document.getElementById('corrida');
-DATOS.forEach((d, i) => { const o = document.createElement('option'); o.value = i; o.textContent = d.etiqueta + `  (p95 meseta ${Math.round(d.resumen.p95_meseta)} ms)`; sel.appendChild(o); });
-let idx = 0, t = 0, jugando = true, modo = 'multitud', ultimo = performance.now();
-const paquetes = [];
+DATOS.forEach((d, i) => { const o = document.createElement('option'); o.value = i; o.textContent = d.etiqueta + (d.lado ? ` · ${d.lado === 'antes' ? 'antes' : 'después'}` : '') + `  (p95 meseta ${Math.round(d.resumen.p95_meseta)} ms)`; sel.appendChild(o); });
+// Parejas: dos corridas del mismo escenario, una marcada «antes» y otra «despues» (animacion-datos.py).
+const PAREJAS = [];
+DATOS.forEach((d, i) => {
+  if (d.lado !== 'antes') return;
+  const j = DATOS.findIndex((e) => e.etiqueta === d.etiqueta && e.lado === 'despues');
+  if (j >= 0) PAREJAS.push({ nombre: d.etiqueta, a: i, b: j });
+});
+let idx = 0, ipar = 0, t = 0, jugando = true, modo = PAREJAS.length ? 'comparar' : 'multitud', ultimo = performance.now();
+const paquetes = [], paqA = [], paqB = [];
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 // ---- primitivas de píxel --------------------------------------------------------------------
@@ -87,7 +101,7 @@ function dibujarMultitud(d, s, frac) {
   const fase = s < d.fase.rampa[1] ? 'rampa' : s < d.fase.meseta[1] ? 'meseta' : 'bajada';
   const activos = fase === 'rampa' ? Math.round(d.vus * Math.max(0, (s - d.fase.rampa[0]) / Math.max(1, d.fase.rampa[1] - d.fase.rampa[0]))) : fase === 'meseta' ? d.vus : Math.round(d.vus * Math.max(0, 1 - (s - d.fase.meseta[1]) / 12));
   px(0, 0, W, H, P.fondo);
-  texto(d.etiqueta, 8, 8, P.tinta, 12);
+  textoEn(d.etiqueta + (d.lado ? (d.lado === 'antes' ? ' · antes' : ' · después') : ''), 8, 8, W - 130, P.tinta, 12);
   texto(`${Math.floor(s)} s · ${fase}`, W - 8 - `${Math.floor(s)} s · ${fase}`.length * 7, 10, fase === 'meseta' ? P.verde : P.gris, 11);
 
   // --- teléfonos
@@ -112,7 +126,7 @@ function dibujarMultitud(d, s, frac) {
 
   // --- API
   const A = Z.api; caja(A.x, A.y, A.w, A.h, P.verde, 'API · uvicorn');
-  const procesos = d.etiqueta.startsWith('2') ? 2 : d.etiqueta.startsWith('4') ? 4 : 1; const cpu = S.api_cpu[i] || 0;
+  const procesos = (d.resumen && d.resumen.procesos) || (d.etiqueta.startsWith('2') ? 2 : d.etiqueta.startsWith('4') ? 4 : 1); const cpu = S.api_cpu[i] || 0;
   for (let k = 0; k < procesos; k++) chip(A.x + 10 + k * 30, A.y + 24, cpu / procesos, `p${k + 1}`);
   const xTxt = A.x + 10 + procesos * 30 + 4, wTxt = A.w - 20 - procesos * 30;
   if (wTxt >= 70) {
@@ -174,8 +188,138 @@ function dibujarMultitud(d, s, frac) {
   texto(donde, 8, 312, cola > 20 || ocup >= 38 ? P.ambar : P.verde, 11);
   // barra horizontal del p95 (escala 0–3 s)
   const ancho = Math.min(W - 16, (p95s || 0) / 3000 * (W - 16));
-  px(8, 336, W - 16, 12, '#1c2436'); px(8, 336, ancho, 12, (p95s || 0) > 1500 ? P.rojo : (p95s || 0) > 500 ? P.ambar : P.verde); px(8 + (W - 16) / 2, 332, 2, 20, P.tinta);
-  texto('0', 8, 350, P.gris, 8); texto('1,5 s', 8 + (W - 16) / 2 - 12, 350, P.gris, 8); texto('3 s', W - 24, 350, P.gris, 8);
+  px(8, 336, W - 16, 12, '#1c2436'); px(8, 336, ancho, 12, (p95s || 0) > 1500 ? P.rojo : (p95s || 0) > 500 ? P.ambar : P.verde); px(8 + (W - 16) / 2, 332, 2, 18, P.tinta);
+  texto('0', 8, 352, P.gris, 8); texto('1,5 s', 8 + (W - 16) / 2 + 5, 352, P.gris, 8); texto('3 s', W - 24, 352, P.gris, 8);
+}
+
+// ---- antes / después: las dos corridas del mismo escenario, a la vez y con el mismo reloj -------
+// Dos bandas con la misma tubería en pequeño. Lo que cambia se ve moverse: las respuestas 429
+// rebotan en nginx, las filas caen a la base de la API por su propio carril y el contador de
+// líneas de log corre dentro de la caja de la API.
+const B = { tel: { x: 8, w: 118 }, nginx: { x: 142, w: 96 }, api: { x: 254, w: 140 }, fpm: { x: 410, w: 140 }, pg: { x: 566, w: 66 } };
+const ALTO = 86;
+const cx = (z) => z.x + z.w / 2;
+const coma = (x) => String(x).replace('.', ',');
+const fms = (ms) => ms == null ? '—' : ms >= 1000 ? coma((ms / 1000).toFixed(1)) + ' s' : Math.round(ms) + ' ms';
+const colP95 = (ms) => (ms || 0) > 1500 ? P.rojo : (ms || 0) > 500 ? P.ambar : P.verde;
+// Ancho real de un texto en el lienzo: para encadenar textos sin que uno pise al siguiente.
+const ancho = (s, tam = FUENTE) => { g.font = `${tam}px monospace`; return Math.ceil(g.measureText(s).width); };
+
+function banda(d, s, y0, paqs) {
+  const S = d.series; const i = Math.min(Math.max(0, Math.floor(s)), d.segundos - 1); const frac = s - Math.floor(s);
+  const fase = s < d.fase.rampa[1] ? 'rampa' : s < d.fase.meseta[1] ? 'meseta' : 'bajada';
+  const activos = fase === 'rampa' ? Math.round(d.vus * Math.max(0, (s - d.fase.rampa[0]) / Math.max(1, d.fase.rampa[1] - d.fase.rampa[0]))) : fase === 'meseta' ? d.vus : Math.round(d.vus * Math.max(0, 1 - (s - d.fase.meseta[1]) / 12));
+  const antes = d.lado === 'antes'; const tono = antes ? P.ambar : P.verde;
+  px(8, y0, antes ? 40 : 52, 11, tono); texto(antes ? 'ANTES' : 'DESPUÉS', 11, y0 + 1, P.oscuro, 9);
+  textoEn(`p95 en la meseta ${fms(d.resumen.p95_meseta)} · ${d.resumen.rechazos} respuestas 429 en la corrida · ${fase}`, antes ? 54 : 66, y0 + 1, W - 80, P.gris, 9);
+  const y = y0 + 14;
+
+  // personas
+  const T = B.tel; caja(T.x, y, T.w, ALTO, P.azul, `${activos} personas`);
+  const cols = 9, iconos = Math.min(d.vus, 36), porIcono = d.vus / iconos;
+  const concAPI = S.concurrencia[i] || 0;
+  const encendidos = Math.min(Math.round(activos / porIcono), Math.round(iconos * Math.min(1, concAPI / Math.max(1, d.vus))));
+  for (let k = 0; k < iconos; k++) telefono(T.x + 8 + (k % cols) * 12, y + 20 + Math.floor(k / cols) * 16, k < encendidos);
+
+  // nginx
+  const N = B.nginx; caja(N.x, y, N.w, ALTO, P.gris, 'nginx');
+  const p95s = S.p95[i], rech = S.rechazos[i] || 0;
+  textoEn(`${S.llegadas[i]} pet/s`, N.x + 6, y + 19, N.w - 12, P.tinta, 9);
+  textoEn(`p95 ${fms(p95s)}`, N.x + 6, y + 31, N.w - 12, colP95(p95s), 11);
+  textoEn(`429: ${rech} /s`, N.x + 6, y + 47, N.w - 12, rech ? P.rojo : P.gris, 10);
+  const anchoB = N.w - 12, lleno = Math.min(anchoB, (p95s || 0) / 3000 * anchoB);
+  px(N.x + 6, y + 62, anchoB, 7, '#1c2436'); px(N.x + 6, y + 62, lleno, 7, colP95(p95s)); px(N.x + 6 + anchoB / 2, y + 60, 1, 11, P.tinta);
+  texto('SLO 1,5 s', N.x + N.w - 6 - ancho('SLO 1,5 s', 8), y + 72, P.gris, 8);
+
+  // API
+  const A = B.api; caja(A.x, y, A.w, ALTO, P.verde, 'API · uvicorn');
+  const procesos = d.resumen.procesos || 1, cpu = S.api_cpu[i] || 0;
+  for (let k = 0; k < Math.min(procesos, 2); k++) chip(A.x + 8 + k * 30, y + 19, cpu / procesos, `p${k + 1}`);
+  const cola = Math.max(0, Math.round(concAPI - (S.moodle_concurrencia[i] || 0)));
+  textoEn(`CPU ${Math.round(cpu)} %`, A.x + 70, y + 20, A.w - 76, cpu / procesos > 90 ? P.rojo : P.tinta, 9);
+  textoEn(`espera ${cola}`, A.x + 70, y + 32, A.w - 76, cola > 20 ? P.rojo : cola > 5 ? P.ambar : P.gris, 9);
+  const lin = S.log_lineas[i] || 0;
+  textoEn(`log ${lin} lín/s`, A.x + 8, y + 54, A.w - 16, lin > 300 ? P.ambar : P.gris, 9);
+  for (let k = 0; k < Math.min(cola, 63); k++) px(A.x + 8 + (k % 21) * 6, y + 66 + Math.floor(k / 21) * 6, 5, 5, cola > 50 ? P.rojo : P.ambar);
+  if (cola > 63) textoEn(`+${cola - 63}`, A.x + A.w - 36, y + 54, 30, P.rojo, 9);
+
+  // php-fpm
+  const F = B.fpm; caja(F.x, y, F.w, ALTO, P.naranja, 'Moodle · php-fpm');
+  const ocup = Math.min(40, Math.round(S.moodle_concurrencia[i] || 0)), procs = Math.round(S.fpm_procesos[i] || 0);
+  for (let k = 0; k < 40; k++) px(F.x + 10 + (k % 20) * 6, y + 19 + Math.floor(k / 20) * 6, 5, 5, k < ocup ? (ocup >= 38 ? P.rojo : P.naranja) : k < procs ? '#5a4030' : '#1c2436');
+  textoEn(`ocupados ${ocup} de 40`, F.x + 8, y + 34, F.w - 16, ocup >= 38 ? P.rojo : P.tinta);
+  textoEn(`${S.moodle_llamadas[i]} llamadas/s`, F.x + 8, y + 47, F.w - 16, P.tinta, 9);
+  textoEn(`${S.moodle_ms_p50[i] ?? '—'} ms cada una`, F.x + 8, y + 58, F.w - 16, (S.moodle_ms_p50[i] || 0) > 300 ? P.ambar : P.gris, 9);
+  textoEn(`CPU ${Math.round(S.fpm_cpu[i] || 0)} %`, F.x + 8, y + 70, F.w - 16, P.gris, 8);
+
+  // base de la API: filas escritas por segundo = llegadas reales del segundo × filas por petición de la corrida
+  const G = B.pg; caja(G.x, y, G.w, ALTO, P.lila, 'BD API');
+  const fpp = d.resumen.filas_por_peticion; const filasSeg = fpp == null ? null : (S.llegadas[i] || 0) * fpp;
+  cilindro(G.x + 12, y + 19, 42, P.azul, '');
+  textoEn(filasSeg == null ? '—' : filasSeg >= 10 ? `${Math.round(filasSeg)}/s` : `${coma(filasSeg.toFixed(1))}/s`, G.x + 6, y + 46, G.w - 12, (filasSeg || 0) > 20 ? P.ambar : P.verde, 10);
+  textoEn('filas', G.x + 6, y + 58, G.w - 12, P.gris, 8);
+  textoEn(fpp == null ? '' : `${coma(fpp)}/pet`, G.x + 6, y + 69, G.w - 12, P.gris, 8);
+
+  // carriles: ida, vuelta y, aparte, el de las filas hacia la base
+  const yIda = y + ALTO + 8, yVuelta = yIda + 8, yEsc = yVuelta + 8;
+  px(cx(T), yIda, cx(F) - cx(T), 2, P.carril); px(cx(T), yVuelta, cx(F) - cx(T), 2, P.carril);
+  for (const z of [T, N, A, F]) px(cx(z), y + ALTO, 2, yVuelta + 2 - y - ALTO, P.carril);
+  px(cx(A) + 6, yEsc, cx(G) - cx(A) - 6, 2, '#3a2f55'); px(cx(A) + 6, y + ALTO, 2, yEsc + 2 - y - ALTO, '#3a2f55'); px(cx(G), y + ALTO, 2, yEsc + 2 - y - ALTO, '#3a2f55');
+  texto('filas a la base →', cx(A) - 96, yEsc - 3, P.gris, 8);
+
+  // paquetes: peticiones (según las llegadas reales), rechazos 429 y filas
+  const cuantos = (tipo) => paqs.reduce((n, p) => n + (p.nace === i && p.tipo === tipo ? 1 : 0), 0);
+  const servidas = Math.max(0, (S.llegadas[i] || 0) - rech);
+  while (cuantos('p') < Math.round(servidas * frac) && paqs.length < 900) {
+    const dura = Math.max(0.05, rnd(S.p50[i] || 40, S.p95[i] || 100) / 1000);
+    paqs.push({ tipo: 'p', nace: i, t0: s, dura, moodle: Math.random() < Math.min(1, (S.moodle_llamadas[i] || 0) / Math.max(1, S.llegadas[i] || 1)), y: rnd(-2, 2) });
+  }
+  while (cuantos('r') < Math.round(rech * frac) && paqs.length < 900) paqs.push({ tipo: 'r', nace: i, t0: s, dura: 0.7, y: rnd(-2, 2) });
+  while (cuantos('f') < Math.round(Math.min(filasSeg || 0, 80) * frac) && paqs.length < 900) paqs.push({ tipo: 'f', nace: i, t0: s, dura: 0.45, y: rnd(-1, 1) });
+  for (let k = paqs.length - 1; k >= 0; k--) {
+    const p = paqs[k]; const a = (s - p.t0) / p.dura; if (a >= 1 || a < 0) { paqs.splice(k, 1); continue; }
+    if (p.tipo === 'f') { px(cx(A) + 6 + (cx(G) - cx(A) - 6) * a, yEsc + p.y - 1, 2, 3, P.lila); continue; }
+    const x0 = cx(T), x1 = p.tipo === 'r' ? cx(N) : p.moodle ? cx(F) : cx(A);
+    const x = a < 0.5 ? x0 + (x1 - x0) * (a / 0.5) : x1 - (x1 - x0) * ((a - 0.5) / 0.5);
+    const col = p.tipo === 'r' ? P.rojo : p.dura > 1.5 ? P.rojo : p.dura > 0.5 ? P.ambar : P.verde;
+    const yy = (a < 0.5 ? yIda : yVuelta) + p.y - 1;
+    if (p.tipo === 'r') { px(x - 1, yy - 1, 5, 5, P.rojo); px(x, yy, 3, 3, P.oscuro); px(x + 1, yy + 1, 1, 1, P.rojo); }
+    else px(x, yy, 3, 3, col);
+  }
+  return { p95: p95s };
+}
+
+function duracionPareja(par) {
+  const a = DATOS[par.a], b = DATOS[par.b];
+  return Math.max(10, Math.min(a.segundos - Math.max(0, a.fase.rampa[0]), b.segundos - Math.max(0, b.fase.rampa[0])));
+}
+
+function dibujarComparacion(par, s) {
+  const a = DATOS[par.a], b = DATOS[par.b];
+  px(0, 0, W, H, P.fondo);
+  textoEn(par.nombre, 8, 2, W - 150, P.tinta, 11);
+  const reloj = `${Math.floor(s)} s desde el inicio`; texto(reloj, W - 8 - reloj.length * 6, 3, P.gris, 9);
+  const ra = banda(a, s + Math.max(0, a.fase.rampa[0]), 16, paqA);
+  px(0, 147, W, 1, P.borde);
+  const rb = banda(b, s + Math.max(0, b.fase.rampa[0]), 150, paqB);
+  // franja: qué cambió, con las cifras de las dos corridas
+  px(0, 284, W, 1, P.borde);
+  texto('QUÉ CAMBIÓ · medido en estas dos corridas', 8, 288, P.tinta, 10);
+  const fila = (x, y, rotulo, va, vb) => {
+    texto(rotulo, x, y, P.gris, 9);
+    const xa = x + ancho(rotulo, 9) + 8; texto(va, xa, y, P.ambar, 9);
+    const xf = xa + ancho(va, 9) + 5; texto('→', xf, y, P.gris, 9); texto(vb, xf + ancho('→', 9) + 5, y, P.verde, 9);
+  };
+  const n = (x) => x == null ? '—' : coma(x);
+  fila(8, 304, 'p95 en la meseta', fms(a.resumen.p95_meseta), fms(b.resumen.p95_meseta));
+  fila(330, 304, 'respuestas 429', String(a.resumen.rechazos), String(b.resumen.rechazos));
+  fila(8, 318, 'filas a la base por petición', n(a.resumen.filas_por_peticion), n(b.resumen.filas_por_peticion));
+  fila(330, 318, 'líneas de log por petición', n(a.resumen.lineas_log_por_peticion), n(b.resumen.lineas_log_por_peticion));
+  let xs = 8; const tramo = (txt, col) => { texto(txt, xs, 336, col, 9); xs += ancho(txt, 9) + 6; };
+  tramo('en este segundo, p95 de lo que llega:', P.gris); tramo(fms(ra.p95), colP95(ra.p95)); tramo('antes, frente a', P.gris); tramo(fms(rb.p95), colP95(rb.p95)); tramo('después', P.gris);
+  px(8, 349, 300, 5, '#1c2436'); px(8, 349, Math.min(300, (ra.p95 || 0) / 3000 * 300), 5, P.ambar);
+  px(330, 349, 300, 5, '#1c2436'); px(330, 349, Math.min(300, (rb.p95 || 0) / 3000 * 300), 5, P.verde);
+  px(8 + 150, 347, 1, 9, P.tinta); px(330 + 150, 347, 1, 9, P.tinta);
 }
 
 // ---- una persona: cada petición como barra, con el tramo del servidor -------------------------
@@ -217,24 +361,54 @@ function frame(ahora) {
   const d = DATOS[idx]; const dtms = ahora - ultimo; ultimo = ahora;
   if (jugando) t += (dtms / 1000) * Number(document.getElementById('vel').value);
   const finP = modo === 'persona' ? (personaComprimida(d).reduce((m, p) => Math.max(m, p.fin), 0) / 1000 * 8 || 40) : 0;
+  if (modo === 'comparar') {
+    const par = PAREJAS[ipar], fin = duracionPareja(par);
+    if (t > fin) { t = 0; paqA.length = 0; paqB.length = 0; }
+    dibujarComparacion(par, t);
+    document.getElementById('scrub').value = Math.round(100 * t / fin);
+    document.getElementById('reloj').textContent = `${Math.floor(t)} s de ${Math.floor(fin)}`;
+    requestAnimationFrame(frame); return;
+  }
   if (modo === 'multitud') { if (t > d.segundos) t = 0; dibujarMultitud(d, t, t - Math.floor(t)); }
   else { if (t > finP + 1) t = 0; dibujarPersona(d, t); }
   document.getElementById('scrub').value = modo === 'multitud' ? Math.round(100 * t / d.segundos) : Math.round(100 * t / finP);
   document.getElementById('reloj').textContent = modo === 'multitud' ? `${Math.floor(t)} s de ${d.segundos}` : `${Math.round(t * 1000 / 8)} ms`;
   requestAnimationFrame(frame);
 }
-sel.onchange = () => { idx = Number(sel.value); t = 0; paquetes.length = 0; leyenda(); };
+const limpiar = () => { t = 0; paquetes.length = 0; paqA.length = 0; paqB.length = 0; };
+function mostrarControles() {
+  const cmp = modo === 'comparar';
+  document.getElementById('comparar').hidden = !PAREJAS.length;
+  document.getElementById('comparar').classList.toggle('activo', cmp);
+  document.getElementById('lpareja').hidden = !cmp;
+  document.getElementById('lcorrida').hidden = cmp;
+  document.getElementById('modo').hidden = cmp;
+}
+const selPar = document.getElementById('pareja');
+PAREJAS.forEach((par, i) => { const o = document.createElement('option'); o.value = i; o.textContent = par.nombre; selPar.appendChild(o); });
+selPar.onchange = () => { ipar = Number(selPar.value); limpiar(); leyenda(); };
+document.getElementById('comparar').onclick = () => { modo = modo === 'comparar' ? 'multitud' : 'comparar'; limpiar(); mostrarControles(); leyenda(); };
+sel.onchange = () => { idx = Number(sel.value); limpiar(); leyenda(); };
 document.getElementById('play').onclick = (e) => { jugando = !jugando; e.target.textContent = jugando ? '⏸ pausa' : '▶ seguir'; e.target.classList.toggle('activo', jugando); };
-document.getElementById('scrub').oninput = (e) => { const d = DATOS[idx]; const finP = personaComprimida(d).reduce((m, p) => Math.max(m, p.fin), 0) / 1000 * 8 || 40; t = (modo === 'multitud' ? d.segundos : finP) * Number(e.target.value) / 100; paquetes.length = 0; };
+document.getElementById('scrub').oninput = (e) => { const d = DATOS[idx]; const finP = personaComprimida(d).reduce((m, p) => Math.max(m, p.fin), 0) / 1000 * 8 || 40; const total = modo === 'comparar' ? duracionPareja(PAREJAS[ipar]) : modo === 'multitud' ? d.segundos : finP; t = total * Number(e.target.value) / 100; paquetes.length = 0; paqA.length = 0; paqB.length = 0; };
 document.getElementById('modo').onclick = (e) => { modo = modo === 'multitud' ? 'persona' : 'multitud'; t = 0; paquetes.length = 0; e.target.textContent = modo === 'multitud' ? '👤 una persona (teléfono)' : '👥 la multitud (escalera)'; leyenda(); };
 function leyenda() {
   const d = DATOS[idx]; const L = document.getElementById('leyenda');
+  if (modo === 'comparar') {
+    const par = PAREJAS[ipar], a = DATOS[par.a], b = DATOS[par.b];
+    L.innerHTML = `<b>Las dos corridas del mismo escenario, con el mismo reloj</b> (segundos desde que empieza a entrar la carga): arriba como estaba, abajo con el cambio. Mismo guion, mismas cuentas y mismo sobre. <b>Qué es real:</b> llegadas, p95 y respuestas 429 de cada segundo (log de nginx); personas esperando dentro de la API y llamadas a Moodle a la vez (log <code>[ws]</code>); CPU y trabajadores de php-fpm (telemetría); líneas que el backend escribió en su log ese segundo. Las filas por segundo hacia la base de la API son las llegadas reales de ese segundo por las filas por petición medidas en la corrida entera (<code>escrituras.json</code>). Un teléfono encendido es una persona que en ese momento espera una respuesta. <b>Qué es dibujo:</b> la posición de cada punto dentro de su segundo.<br>
+      <span class="k" style="background:#5df08a"></span>petición de menos de 0,5 s · <span class="k" style="background:#ffcc4d"></span>entre 0,5 y 1,5 s · <span class="k" style="background:#ff5c5c"></span>más de 1,5 s, o un 429 que rebota en nginx (cuadro rojo hueco) · <span class="k" style="background:#c58cff"></span>filas escritas en la base de la API. Antes: ${a.resumen.peticiones} peticiones, p95 en la meseta ${Math.round(a.resumen.p95_meseta)} ms. Después: ${b.resumen.peticiones} peticiones, p95 ${Math.round(b.resumen.p95_meseta)} ms.`;
+    return;
+  }
   L.innerHTML = modo === 'multitud'
     ? `<b>Qué es real:</b> las llegadas por segundo, la duración de las peticiones (p50 y p95 de cada segundo) y los errores salen del log de nginx de la corrida; las llamadas a Moodle y su duración, del log <code>[ws]</code> del backend; la CPU de la API y los procesos de php-fpm, de la telemetría (cada 2 s). «A la vez» es la concurrencia media exacta de ese segundo: cuánto de cada petición cae dentro de él, sumado (el log de nginx trunca la llegada al segundo; dentro de él se reparten uniformemente). <b>Qué es dibujo:</b> la posición de cada paquete dentro de su segundo y qué teléfono se ilumina.<br>
        <span class="k" style="background:#5df08a"></span>petición de menos de 0,5 s · <span class="k" style="background:#ffcc4d"></span>entre 0,5 y 1,5 s · <span class="k" style="background:#ff5c5c"></span>más de 1,5 s (fuera del SLO). La pila de bloques dentro de la API son las peticiones que esperan al proceso; los cuadros naranjas de php-fpm, los trabajadores ocupados de 40. Corrida: <code>${d.etiqueta}</code>, ${d.resumen.peticiones} peticiones, ${d.resumen.moodle} llamadas a Moodle, p95 en la meseta ${Math.round(d.resumen.p95_meseta)} ms.`
     : `<b>Qué es real:</b> cada petición que la app hizo desde el teléfono (Xiaomi 2407FPN8EG, Wi-Fi del laboratorio), con su inicio y su fin medidos en el teléfono, y el tiempo que el servidor dijo haber tardado (<code>X-Execution-Time-Ms</code>). La diferencia es la red de ida y vuelta. Reloj a 1/8 de la velocidad real; las pausas entre gestos se recortan a 1,5 s.`;
 }
-leyenda(); requestAnimationFrame(frame);
+// Otras medidas del mismo cambio que no salen de estas corridas: cada una con su fuente.
+const OTRAS = (() => { try { return JSON.parse(document.getElementById('otras').textContent || '[]'); } catch (e) { return []; } })();
+if (OTRAS.length) document.getElementById('extras').innerHTML = '<b>Otras medidas del mismo cambio</b> (no salen de estas corridas; cada una con su fuente)<table><tr><th>Medida</th><th>Antes</th><th>Después</th><th>Cómo se midió</th></tr>' + OTRAS.map((o) => `<tr><td>${o.medida}</td><td class="antes">${o.antes}</td><td class="despues">${o.despues}</td><td>${o.fuente}</td></tr>`).join('') + '</table>';
+mostrarControles(); leyenda(); requestAnimationFrame(frame);
 })();
 </script>
 </body>
