@@ -19,6 +19,16 @@ SERIAL="${ANDROID_SERIAL:-$(adb devices | awk -F'\t' 'NR>1 && $2=="device" {prin
 [ -n "$SERIAL" ] || { echo "telefono: no hay dispositivo (adb devices)" >&2; exit 2; }
 adb() { command adb -s "$SERIAL" "$@"; }
 
+# Con la pantalla apagada o bloqueada el WebView está en pausa: los gestos no encuentran nada y las
+# peticiones no terminan, pero el recorrido «corre» y deja un resumen con forma de resultado (pasó el
+# 2026-10-01). Aquí se corta antes: desbloquear es cosa de quien tiene el teléfono en la mano.
+if ! adb shell dumpsys power 2>/dev/null | grep -q 'mWakefulness=Awake'; then
+  adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1; sleep 1
+fi
+if adb shell dumpsys window 2>/dev/null | grep -q 'isKeyguardShowing=true'; then
+  echo "telefono: la pantalla está bloqueada; desbloquéala en el aparato y vuelve a correr" >&2; exit 2
+fi
+
 mkdir -p "$SALIDA"
 PID=$(adb shell pidof "$APP" 2>/dev/null | tr -d '\r' | awk '{print $1}')
 if [ -z "$PID" ]; then

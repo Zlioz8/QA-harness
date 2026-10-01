@@ -1200,3 +1200,30 @@ la avalancha de logins pasa con 100 en 10 s y no con 200 (p95 1,6 s), venga de u
 con 60 personas en la web, a 200 personas de la app el p99 sube de 389 a 595 ms y el quiebre sigue
 entre 200 y 400. No se midió el teléfono con red móvil emulada: la depuración inalámbrica del aparato
 estaba apagada.
+
+## L-R9-10 — Medir un cambio de la app: el teléfono cuenta peticiones y el modelo aprende la app nueva
+
+**Ronda:** #9, 2026-10-01.
+
+**Qué se midió.** La fase 2 de la app (pide menos: el conteo de notificaciones cada 30 s, el panel y la
+lista una vez, dato fresco solo al tirar) y su parte de backend (el conteo lo hace Moodle y se guarda).
+
+**Cómo.** Dos instrumentos distintos para dos preguntas distintas:
+
+- *¿Cuánto pide la app?* El teléfono real, con `telefono.sh`: el mismo recorrido antes y después,
+  contando peticiones por gesto. De 20 a 13. Ganó el gesto `reanudar` (el evento `resume` de Capacitor),
+  porque una parte de lo que cambiaba solo ocurre al volver del segundo plano.
+- *¿Qué le hace eso al servidor?* La escalera, dos veces: con el modelo de la grabación (teléfonos con
+  la app anterior contra el backend nuevo) y con `CARGA_APP=fase2`, que reproduce lo que el teléfono
+  pidió con el APK nuevo. El modelo guarda las dos conductas: habrá teléfonos con cada versión.
+
+**Trampa, la tercera con la misma forma.** El primer recorrido con el APK nuevo corrió con la pantalla
+del teléfono apagada y bloqueada: gestos que no encuentran nada, peticiones sin respuesta, y aun así un
+resumen con sus filas. `telefono.sh` comprueba ahora que la pantalla esté encendida y desbloqueada antes
+de empezar, y si no, se niega. (Las otras dos: el fondo web que no iniciaba sesión, L-R9-09, y la espera
+con `pgrep`, L-R9-08.) La regla común: **un instrumento que puede terminar sin haber medido tiene que
+decirlo él**.
+
+**La red móvil emulada** (`red-movil.sh`: 80 ± 20 ms, 1 % de pérdida, 10 Mbit hacia el teléfono) se
+corrió por fin: el tiempo por petición pasa de 101 a 208 ms de mediana y las pantallas siguen por debajo
+de 0,65 s; el arranque, de 2,6 a entre 2,6 y 3,4 s.

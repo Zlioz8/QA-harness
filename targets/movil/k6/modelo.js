@@ -123,7 +123,31 @@ function renovarSiToca() {
 }
 
 const T = () => ({ token: yo.s.access });
-const conteo = (recorrido) => ok(pedir('GET', '/notifications/unread/count', null, { ...T(), endpoint: 'conteo', recorrido }), 'conteo');
+
+// ---- qué app se imita ------------------------------------------------------------------------
+// `anterior` (por omisión) es la de la grabación del 24 al 29 de septiembre. `fase2` es la del
+// 2026-10-01, medida con el APK nuevo en el teléfono (reports/movil/telefono/20261001/fase2-flujo):
+//   - el conteo de notificaciones no se repite antes de 30 s (antes, uno por pantalla);
+//   - el arranque y el inicio piden el panel una vez (antes, tres y dos);
+//   - la lista de notificaciones se pide una vez (antes, dos);
+//   - el detalle de curso pide dato fresco solo al tirar de la pantalla. La proporción de quien
+//     tira no está medida en uso real: se usa la del panel (17 %), como SUPUESTO.
+// El mismo recorrido pasó de 20 peticiones a 13. Con `CARGA_APP=fase2` «una persona» pide menos.
+const APP_NUEVA = (__ENV.CARGA_APP || 'anterior') === 'fase2';
+const EDAD_DEL_CONTEO_MS = 30000;
+// ¿Toca pedir el conteo? En la app anterior, siempre. En la nueva, si el último tiene más de 30 s.
+function tocaConteo() {
+  if (!APP_NUEVA) return true;
+  if (Date.now() - (yo.conteoEn || 0) < EDAD_DEL_CONTEO_MS) return false;
+  yo.conteoEn = Date.now();
+  return true;
+}
+const CONTEO = ['GET', '/notifications/unread/count', null, 'conteo'];
+const conConteo = (entradas) => (tocaConteo() ? [...entradas, CONTEO] : entradas);
+const conteo = (recorrido) => {
+  if (!tocaConteo()) return;
+  ok(pedir('GET', '/notifications/unread/count', null, { ...T(), endpoint: 'conteo', recorrido }), 'conteo');
+};
 
 function guardarPanel(r) {
   const b = json(r);
@@ -140,6 +164,12 @@ export function arranque() {
   const r = pedir('GET', '/dashboard/admin', null, { ...T(), endpoint: 'panel', recorrido: rec });
   ok(r, 'panel');
   guardarPanel(r);
+  if (APP_NUEVA) {
+    const a = pedir('GET', '/agenda/pendientes?cuantos=15', null, { ...T(), endpoint: 'agenda', recorrido: rec });
+    anotar(a);
+    check(a, { 'agenda 200': (x) => x.status === 200 });
+    return;
+  }
   const rs = lote([
     ['GET', '/dashboard/admin', null, 'panel'],
     ['GET', '/dashboard/admin', null, 'panel'],
@@ -155,7 +185,10 @@ export function arranque() {
 export function inicio() {
   const rec = 'inicio';
   const fresco = Math.random() < 0.17 ? '?fresco=1' : '';
-  const rs = lote([
+  const rs = lote(APP_NUEVA ? conConteo([
+    ['GET', '/agenda/pendientes?cuantos=15', null, 'agenda'],
+    ['GET', `/dashboard/admin${fresco}`, null, 'panel'],
+  ]) : [
     ['GET', '/agenda/pendientes?cuantos=15', null, 'agenda'],
     ['GET', '/dashboard/admin', null, 'panel'],
     ['GET', `/dashboard/admin${fresco}`, null, 'panel'],
@@ -172,8 +205,11 @@ export function abrirCurso() {
   if (!yo.cursos || !yo.cursos.length) return inicio();
   const rec = 'curso';
   const c = yo.cursos[Math.floor(Math.random() * yo.cursos.length)];
-  const fresco = Math.random() < 0.71 ? '?fresco=1' : '';
-  const rs = lote([
+  const fresco = Math.random() < (APP_NUEVA ? 0.17 : 0.71) ? '?fresco=1' : '';
+  const rs = lote(APP_NUEVA ? conConteo([
+    ['GET', `/dashboard/cursos/${c.id}${fresco}`, null, 'curso'],
+    ['POST', '/grades/my_role', { courseid: c.id }, 'my_role'],
+  ]) : [
     ['GET', `/dashboard/cursos/${c.id}${fresco}`, null, 'curso'],
     ['GET', '/notifications/unread/count', null, 'conteo'],
     ['POST', '/grades/my_role', { courseid: c.id }, 'my_role'],
@@ -209,12 +245,11 @@ export function calificaciones() {
   const rec = 'calificaciones';
   const id = yo.abierto;
   if (!yo.ensena) {
-    const rs = lote([
+    const rs = lote(conConteo([
       ['POST', '/grades/my_role', { courseid: id }, 'my_role'],
       ['GET', `/cursos/${id}/resultados-de-aprendizaje`, null, 'rap'],
       ['POST', '/grades/parsed_table', { courseid: id }, 'notas'],
-      ['GET', '/notifications/unread/count', null, 'conteo'],
-    ], { ...T(), recorrido: rec });
+    ]), { ...T(), recorrido: rec });
     rs.forEach((x) => anotar(x));
     check(rs[2], { 'notas 200': (x) => x.status === 200 });
     return;
@@ -255,7 +290,9 @@ export function calendario() {
 // Notificaciones. Medido 26 veces: la lista se pide DOS veces (ngOnInit del componente e
 // ionViewDidEnter de la página) + conteo.
 export function notificaciones() {
-  const rs = lote([
+  const rs = lote(APP_NUEVA ? conConteo([
+    ['GET', '/notifications/list?limit=20', null, 'notif_lista'],
+  ]) : [
     ['GET', '/notifications/list?limit=20', null, 'notif_lista'],
     ['GET', '/notifications/list?limit=20', null, 'notif_lista'],
     ['GET', '/notifications/unread/count', null, 'conteo'],

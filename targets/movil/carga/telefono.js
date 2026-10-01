@@ -174,6 +174,12 @@ const GESTOS = {
       console.log(`    intento ${i}: ${msg.trim().replace(/\s+/g, ' ').slice(0, 90)}`);
     }
   },
+  // Volver del segundo plano: Capacitor avisa a la app con el evento `resume` en el documento, y la
+  // página que esté abierta decide qué recarga. Sirve para ver qué pide la app al regresar.
+  reanudar: async () => {
+    await js(`document.dispatchEvent(new Event('resume')); true`);
+    await enReposo(2000, 20000);
+  },
   // Deja pasar la ventana del cupo (61 s) antes de volver a entrar.
   esperar: async () => { await dormir(61000); },
 };
