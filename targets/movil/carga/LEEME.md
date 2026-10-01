@@ -37,10 +37,27 @@ tools/perf-capacidad.py comparar reports/movil/k6/runs/<A> reports/movil/k6/runs
 Otras formas, con el mismo modelo:
 
 ```bash
-make perf-escalera TARGET=movil ESCALERA=pico-login     # todos inician sesión a la vez
+make perf-escalera TARGET=movil ESCALERA=pico-login     # todos inician sesión a la vez, cada uno con su IP
 make perf-escalera TARGET=movil ESCALERA=aula           # 40 personas detrás de una sola IP
 make perf-escalera TARGET=movil ESCALERA=resistencia    # dos horas a carga media
 ```
+
+Los escenarios de escala nacional (una IP no es una persona, y la app no tiene Moodle para ella sola):
+
+```bash
+make perf-escalera TARGET=movil ESCALERA=pico-login-cgnat   # 200 y 400 entran a la vez detrás de UNA IP (operador móvil, Wi-Fi de una sede)
+make perf-escalera TARGET=movil ESCALERA=cgnat              # 400 personas navegando detrás de una sola IP
+make perf-escalera TARGET=movil ESCALERA=con-web            # la app con 60 personas navegando la WEB de Moodle a la vez
+targets/movil/carga/red-movil.sh poner && targets/movil/carga/telefono.sh reports/movil/telefono/<fecha>/red-movil && targets/movil/carga/red-movil.sh quitar
+```
+
+- `con-web` usa `ESCALERA_FONDO_VUS`: esas personas ejecutan la función `fondo` del guion (`k6/web.js`: login por el
+  formulario web, página principal y cursos) durante toda la corrida, con `fase: fondo`, fuera del juicio del SLO.
+  **Hay que mirar que el fondo hizo lo suyo**: en `summary.json`, `fondo_web_sesiones` = personas de fondo y
+  `fondo_web_fallos` = 0. Una corrida con el fondo fallando mide otra cosa (pasó: L-R9-09).
+- `red-movil.sh` añade retardo, variación, pérdida y tope de velocidad a lo que sale hacia el teléfono (netem, pide
+  sudo, `quitar` lo deja como estaba). Necesita `RED_IF` en el `target.env` y el teléfono con la depuración
+  inalámbrica encendida.
 
 ## 2b. El teléfono real, de extremo a extremo
 

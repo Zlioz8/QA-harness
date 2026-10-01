@@ -1167,3 +1167,36 @@ estuvieron media hora sin arrancar. Se espera por la tarea, no por el nombre del
 **Resultado** (corridas `20261001-11*`, `COMPARACION-fase_0-vs-fase_1.md`): a 200 personas la CPU de
 la API baja de 0,45 a 0,27 núcleos y las llamadas a Moodle por petición de 1,64 a 1,39; a 400 el
 p95 pasa de 1.827 a 837 ms. El punto de quiebre no se mueve: php-fpm, 41 de 40 hijos.
+
+## L-R9-09 — Escenarios de escala nacional: una IP no es una persona, y el fondo hay que comprobarlo
+
+**Ronda:** #9, 2026-10-01.
+
+**Qué faltaba.** El perfil medía «cada persona con su IP» y «un aula detrás de una IP». A escala de
+país hay más: un operador móvil saca a miles por la misma dirección (CGNAT), todos entran a la misma
+hora, y la app comparte el Moodle con la web, que tiene sus propios usuarios.
+
+**Qué entró.**
+
+- `pico-login-cgnat` y `cgnat`: cientos de personas entrando a la vez, o navegando, detrás de una sola
+  dirección. Con el cupo de login contando por IP todos los intentos, de 200 personas solo 140
+  entraban (1.855 respuestas 429). Lo que la app corrigió: por IP se cuentan solo los fallos.
+- **Tráfico de fondo** en el núcleo (`CARGA_FONDO_VUS`, `ESCALERA_FONDO_VUS`, `conFondo` en
+  `lib/k6/carga.js`): un segundo escenario de k6 que ejecuta la función `fondo` del guion durante toda
+  la corrida, con `fase: fondo`, para ocupar lo que en la realidad está ocupado sin entrar en el juicio.
+  El perfil lo usa para navegar la web de Moodle (`k6/web.js`).
+- `red-movil.sh`: retardo, variación y pérdida hacia el teléfono con netem.
+
+**La lección.** La primera corrida «con la web en uso» no la tenía: las 60 personas de fondo recibían
+«Acceso inválido» porque en ese Moodle el usuario es el documento más el tipo y el guion mandaba solo
+el documento. La corrida terminó, dio cifras y parecían razonables. Lo delató un contador: 1.320
+fallos de fondo. **Un fondo que falla en silencio produce una medición con forma de medición.** El
+guion cuenta ahora sesiones abiertas, páginas y fallos, y el LEEME dice que se miran antes de leer el
+resultado. La corrida mala quedó en `runs/` con el sufijo `-INVALIDA` y su porqué.
+
+**Resultado** (corridas `20261001-13*` y `-143112-`): detrás de una IP entran las 200 y las 400 sin un
+429; 400 personas navegando detrás de una IP rinden igual que con IP propia (p95 877 frente a 837 ms);
+la avalancha de logins pasa con 100 en 10 s y no con 200 (p95 1,6 s), venga de una IP o de doscientas;
+con 60 personas en la web, a 200 personas de la app el p99 sube de 389 a 595 ms y el quiebre sigue
+entre 200 y 400. No se midió el teléfono con red móvil emulada: la depuración inalámbrica del aparato
+estaba apagada.

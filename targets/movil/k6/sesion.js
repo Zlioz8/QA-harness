@@ -2,6 +2,7 @@
 // La forma la pone CARGA_TIPO (lib/k6/carga.js); la conduce `make perf-escalera TARGET=movil`.
 import { opciones, resumen, VUS } from '/seclab-lib/carga.js';
 import { ENDPOINTS, abrirSesiones, unGesto } from './modelo.js';
+import { navegarWeb } from './web.js';
 
 export const options = opciones(ENDPOINTS);
 
@@ -13,6 +14,11 @@ export function setup() {
 
 export default function (data) {
   unGesto(data);
+}
+
+// Personas de fondo en la web de Moodle (CARGA_FONDO_VUS): ocupan php-fpm como en la plataforma real.
+export function fondo() {
+  navegarWeb();
 }
 
 export function handleSummary(data) {

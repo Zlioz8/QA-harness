@@ -44,6 +44,7 @@ SIGUE="$(def ESCALERA_SIGUE 0)"
 MODELO="$(def ESCALERA_MODELO cerrado)"
 IPS="$(def ESCALERA_IPS "$(envget CARGA_IPS)")"
 ABORTA="$(def ESCALERA_ABORTA "")"
+FONDO="$(def ESCALERA_FONDO_VUS "")"
 NOTA="$(def ESCALERA_NOTA "")"
 # El SLO sale del perfil (los mismos umbrales que juzga `make gate`) salvo que la escalera
 # declare otro: una escalera de humo puede querer uno imposible para probar que sabe fallar.
@@ -96,7 +97,7 @@ json.dump({
     "corrida": "$RUN", "fecha": sh("date", "-Is"),
     "host": f"{os.uname().nodename} · {os.cpu_count()} hilos · {mem} GB",
     "base_url": """$(envget APP_INTERNAL_URL)""", "tipo": "$TIPO", "modelo": "$MODELO",
-    "pasos": "$PASOS".split(), "rampa": "$RAMPA", "meseta": "$MESETA", "bajada": "$BAJADA", "ips": "$IPS",
+    "pasos": "$PASOS".split(), "rampa": "$RAMPA", "meseta": "$MESETA", "bajada": "$BAJADA", "ips": "$IPS", "fondo_vus": "$FONDO",
     "script": script, "script_sha256": hashlib.sha256(open(script, "rb").read()).hexdigest(),
     "k6": sh("docker", "run", "--rm", """${K6_IMAGE:-$(sed -n 's/^ *image: *\${K6_IMAGE:-\(.*\)}$/\1/p' docker-compose.yml | head -1)}""", "version").split(" (")[0],
     "slo": {"p95": "$SLO_P95", "p99": "$SLO_P99", "err": "$SLO_ERR", "checks": "$SLO_CHK"},
@@ -143,7 +144,7 @@ for VUS in $PASOS; do
   echo
   echo "── paso $VUS usuarios ──────────────────────────────────────────────────────────"
   CARGA_TIPO="$TIPO" CARGA_VUS="$VUS" CARGA_RAMPA="$RAMPA" CARGA_MESETA="$MESETA" CARGA_BAJADA="$BAJADA" \
-  CARGA_MODELO="$MODELO" CARGA_IPS="$IPS" CARGA_RUN="$RUN" CARGA_ABORTA="$ABORTA" \
+  CARGA_MODELO="$MODELO" CARGA_IPS="$IPS" CARGA_RUN="$RUN" CARGA_ABORTA="$ABORTA" CARGA_FONDO_VUS="$FONDO" \
   K6_P95_MS="$SLO_P95" K6_P99_MS="$SLO_P99" K6_ERR_RATE="$SLO_ERR" K6_CHECKS_MIN="$SLO_CHK" K6_SCRIPT="$SCRIPT" \
     tools/run-dimension.sh "$TARGET" k6 >"$PD/k6.log" 2>&1
   RC=$?
