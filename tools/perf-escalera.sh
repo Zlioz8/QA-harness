@@ -98,6 +98,9 @@ json.dump({
     "host": f"{os.uname().nodename} · {os.cpu_count()} hilos · {mem} GB",
     "base_url": """$(envget APP_INTERNAL_URL)""", "tipo": "$TIPO", "modelo": "$MODELO",
     "pasos": "$PASOS".split(), "rampa": "$RAMPA", "meseta": "$MESETA", "bajada": "$BAJADA", "ips": "$IPS", "fondo_vus": "$FONDO",
+    # Qué variante del modelo corrió (CARGA_APP): dos corridas con variantes distintas no comparan
+    # «la misma persona», y eso tiene que poder leerse del manifiesto, no de una nota.
+    "app": "${CARGA_APP:-}",
     "script": script, "script_sha256": hashlib.sha256(open(script, "rb").read()).hexdigest(),
     "k6": sh("docker", "run", "--rm", """${K6_IMAGE:-$(sed -n 's/^ *image: *\${K6_IMAGE:-\(.*\)}$/\1/p' docker-compose.yml | head -1)}""", "version").split(" (")[0],
     "slo": {"p95": "$SLO_P95", "p99": "$SLO_P99", "err": "$SLO_ERR", "checks": "$SLO_CHK"},

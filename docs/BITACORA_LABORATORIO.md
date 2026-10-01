@@ -1227,3 +1227,16 @@ decirlo él**.
 **La red móvil emulada** (`red-movil.sh`: 80 ± 20 ms, 1 % de pérdida, 10 Mbit hacia el teléfono) se
 corrió por fin: el tiempo por petición pasa de 101 a 208 ms de mediana y las pantallas siguen por debajo
 de 0,65 s; el arranque, de 2,6 a entre 2,6 y 3,4 s.
+
+**Lo que midió, y la unidad que hubo que cambiar.** Con la app nueva, 200 personas generan 22,8
+peticiones por segundo en vez de 33,6 y el punto de quiebre no se mueve (entre 200 y 400): lo que
+quitó la app eran peticiones que el backend ya contestaba de memoria, y a Moodle le llega casi el
+mismo trabajo. Dos trampas de lectura salieron de ahí:
+
+- **«Por petición» engaña cuando cambia la app.** Las llamadas a Moodle por petición *subieron* de
+  1,39 a 1,75 mientras las llamadas totales bajaban un 16 %: cambió el denominador. Entre versiones
+  de un cliente la unidad estable es la persona; la animación compara ahora por persona y minuto, y
+  `RUN.json` guarda en `app` qué variante del modelo corrió.
+- **Quitar peticiones baratas empeora los percentiles sin empeorar nada.** El p95 del panel a 400
+  personas pasó de 0,9 a 6,4 s: antes, dos de cada tres respuestas eran repeticiones instantáneas
+  que diluían la cola. El percentil por ruta hay que leerlo junto al número de peticiones.

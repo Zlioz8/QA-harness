@@ -332,10 +332,10 @@ function dibujarComparacion(par, s) {
   const pc = (x) => x == null ? '—' : `${x} %`;
   fila(8, 301, 'p95 en la meseta', fms(a.resumen.p95_meseta), fms(b.resumen.p95_meseta));
   fila(330, 301, 'respuestas 429', String(a.resumen.rechazos), String(b.resumen.rechazos));
-  fila(8, 313, 'llamadas a Moodle por petición', n(a.resumen.moodle_por_peticion), n(b.resumen.moodle_por_peticion));
+  fila(8, 313, 'llamadas a Moodle por persona y minuto', n(a.resumen.moodle_por_persona_min), n(b.resumen.moodle_por_persona_min));
   fila(330, 313, 'CPU de la API en la meseta', pc(a.resumen.api_cpu_meseta), pc(b.resumen.api_cpu_meseta));
   fila(8, 325, 'filas a la base por petición', n(a.resumen.filas_por_peticion), n(b.resumen.filas_por_peticion));
-  fila(330, 325, 'líneas de log por petición', n(a.resumen.lineas_log_por_peticion), n(b.resumen.lineas_log_por_peticion));
+  fila(330, 325, 'peticiones por persona y minuto', n(a.resumen.peticiones_por_persona_min), n(b.resumen.peticiones_por_persona_min));
   let xs = 8; const tramo = (txt, col) => { texto(txt, xs, 339, col, 9); xs += ancho(txt, 9) + 6; };
   tramo('en este segundo, p95 de lo que llega:', P.gris); tramo(fms(ra.p95), colP95(ra.p95)); tramo('antes, frente a', P.gris); tramo(fms(rb.p95), colP95(rb.p95)); tramo('después', P.gris);
   px(8, 352, 300, 4, '#1c2436'); px(8, 352, Math.min(300, (ra.p95 || 0) / 3000 * 300), 4, P.ambar);
@@ -417,7 +417,7 @@ function leyenda() {
   const d = DATOS[idx]; const L = document.getElementById('leyenda');
   if (modo === 'comparar') {
     const par = PAREJAS[ipar], a = DATOS[par.a], b = DATOS[par.b];
-    L.innerHTML = `<b>Las dos corridas del mismo escenario, con el mismo reloj</b> (segundos desde que empieza a entrar la carga): arriba como estaba, abajo con el cambio. Mismo guion, mismas cuentas y mismo sobre. <b>Qué es real:</b> llegadas, p95 y respuestas 429 de cada segundo (log de nginx); personas esperando dentro de la API y llamadas a Moodle a la vez (log <code>[ws]</code>); CPU y trabajadores de php-fpm (telemetría); líneas que el backend escribió en su log ese segundo. Las filas por segundo hacia la base de la API son las llegadas reales de ese segundo por las filas por petición medidas en la corrida entera (<code>escrituras.json</code>). Un teléfono encendido es una persona que en ese momento espera una respuesta. <b>Qué es dibujo:</b> la posición de cada punto dentro de su segundo.<br>
+    L.innerHTML = `<b>Las dos corridas del mismo escenario, con el mismo reloj</b> (segundos desde que empieza a entrar la carga): arriba como estaba, abajo con el cambio. Mismas cuentas y mismo sobre. ${b.app && b.app !== a.app ? 'Las personas de abajo usan la app nueva (<code>CARGA_APP=' + b.app + '</code>): el mismo recorrido con menos peticiones, las que el teléfono real pidió con ese APK.' : 'Mismo guion.'} <b>Qué es real:</b> llegadas, p95 y respuestas 429 de cada segundo (log de nginx); personas esperando dentro de la API y llamadas a Moodle a la vez (log <code>[ws]</code>); CPU y trabajadores de php-fpm (telemetría); líneas que el backend escribió en su log ese segundo. Las filas por segundo hacia la base de la API son las llegadas reales de ese segundo por las filas por petición medidas en la corrida entera (<code>escrituras.json</code>). Un teléfono encendido es una persona que en ese momento espera una respuesta. <b>Qué es dibujo:</b> la posición de cada punto dentro de su segundo.<br>
       <span class="k" style="background:#5df08a"></span>petición de menos de 0,5 s · <span class="k" style="background:#ffcc4d"></span>entre 0,5 y 1,5 s · <span class="k" style="background:#ff5c5c"></span>más de 1,5 s, o un 429 que rebota en nginx (cuadro rojo hueco) · <span class="k" style="background:#c58cff"></span>filas escritas en la base de la API · <span class="k" style="background:#3de0c8"></span>Redis: la memoria que comparten los procesos de la API (caché por persona y cupos); no está en el camino hacia Moodle, y su memoria y su CPU son las de su contenedor en ese segundo. Antes: ${a.resumen.peticiones} peticiones, p95 en la meseta ${Math.round(a.resumen.p95_meseta)} ms. Después: ${b.resumen.peticiones} peticiones, p95 ${Math.round(b.resumen.p95_meseta)} ms.`;
     return;
   }

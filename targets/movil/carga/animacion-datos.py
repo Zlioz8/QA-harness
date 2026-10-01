@@ -148,10 +148,20 @@ def main():
         filas = round(sum(tablas[k]["filas_por_peticion"] for k in TABLAS_RENDIMIENTO if k in tablas), 3)
     except (OSError, KeyError, ValueError):
         pass
+    # Qué app imitaba el modelo: del manifiesto de la corrida (el paso vive dentro de ella).
+    app = ""
+    try:
+        man = json.load(open(os.path.join(os.path.dirname(os.path.abspath(d)), "RUN.json")))
+        app = man.get("app") or ("fase2" if "CARGA_APP=fase2" in (man.get("nota_sobre") or "") else "")
+    except (OSError, ValueError):
+        pass
+    # Por persona y minuto, no por petición: si la app pide menos, «por petición» sube aunque a Moodle
+    # le llegue menos trabajo. El denominador que no cambia entre versiones de la app es la persona.
+    personas_min = (det.get("vus") or 0) * n / 60
     m_proc = re.match(r"(\d+) proceso", etiqueta)
     procesos = args.procesos or (int(m_proc.group(1)) if m_proc else 1)
     salida = {
-        "etiqueta": etiqueta, "lado": lado or None, "t0": t0, "segundos": n, "vus": det.get("vus"),
+        "etiqueta": etiqueta, "lado": lado or None, "t0": t0, "segundos": n, "vus": det.get("vus"), "app": app,
         "fase": {"rampa": [ini - t0 if ini else 0, (ini - t0 + rampa) if ini else rampa], "meseta": [(ini - t0 + rampa) if ini else rampa, (ini - t0 + rampa + meseta) if ini else rampa + meseta]},
         "series": {
             "llegadas": llegadas, "salidas": salidas, "en_vuelo": vuelo, "concurrencia": conc, "errores": errores,
@@ -166,6 +176,8 @@ def main():
                     "procesos": procesos, "rechazos": sum(rechazos), "filas_por_peticion": filas,
                     "lineas_log_por_peticion": round(sum(log_lineas) / len(ng), 1),
                     "moodle_por_peticion": round(len(ws) / len(ng), 2), "redis": bool(rcpu),
+                    "peticiones_por_persona_min": round(len(ng) / personas_min, 1) if personas_min else None,
+                    "moodle_por_persona_min": round(len(ws) / personas_min, 1) if personas_min else None,
                     "api_cpu_meseta": media_en_meseta(cpu, ini, rampa, meseta)},
     }
     if tel:

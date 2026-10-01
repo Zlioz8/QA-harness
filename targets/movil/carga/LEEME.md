@@ -54,6 +54,8 @@ targets/movil/carga/red-movil.sh poner && targets/movil/carga/telefono.sh report
 - `CARGA_APP=fase2` hace que el modelo se comporte como la app del 2026-10-01 (conteo de notificaciones cada 30 s,
   panel y lista una vez, dato fresco solo al tirar): `CARGA_APP=fase2 make perf-escalera TARGET=movil`. Sin ella,
   el modelo es el de la grabación de septiembre. Las dos sirven: hay teléfonos con cada versión.
+  La variante queda en `RUN.json` (`app`) y la animación lo avisa. Entre variantes se compara **por persona**,
+  no por petición: si la app pide menos, «llamadas a Moodle por petición» sube aunque el total baje.
 - `con-web` usa `ESCALERA_FONDO_VUS`: esas personas ejecutan la función `fondo` del guion (`k6/web.js`: login por el
   formulario web, página principal y cursos) durante toda la corrida, con `fase: fondo`, fuera del juicio del SLO.
   **Hay que mirar que el fondo hizo lo suyo**: en `summary.json`, `fondo_web_sesiones` = personas de fondo y
