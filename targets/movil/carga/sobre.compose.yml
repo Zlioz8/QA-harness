@@ -13,6 +13,11 @@
 #                            nginx añade la suya: con dos saltos el backend toma la del usuario
 #                            (app/utils/red.py:94-110). SOLO para la prueba: en un despliegue real
 #                            dejaría que cualquiera eligiera su IP.
+#   SOBRE_REDIS_URL          estado compartido entre procesos (caché por persona y cupos). Por omisión
+#                            el Redis del compose del repositorio; vacío (`SOBRE_REDIS_URL=`) mide la
+#                            API con memoria de proceso, que es el «antes» de ese cambio.
+#   SOBRE_COLAPSO            1 = un proceso espera el cálculo que otro ya hace; 0 lo apaga, para
+#                            medir cuánto aporta el candado entre procesos.
 services:
   web:
     cpus: ${SOBRE_CPUS:-4}
@@ -22,3 +27,5 @@ services:
       - LOG_LEVEL=${SOBRE_LOG_LEVEL:-INFO}
       - DEBUG=${SOBRE_DEBUG:-False}
       - WEB_CONCURRENCY=${SOBRE_WORKERS:-1}
+      - REDIS_URL=${SOBRE_REDIS_URL-redis://redis:6379/0}
+      - ESTADO_COLAPSO=${SOBRE_COLAPSO:-1}

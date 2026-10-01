@@ -15,7 +15,8 @@ targets/movil/carga/silencio.sh poner     # para lo ajeno a la prueba y apunta q
 targets/movil/carga/sobre.sh poner        # la API con límites declarados y un salto de proxy más
 ```
 
-`sobre.sh` acepta `SOBRE_CPUS`, `SOBRE_MEM`, `SOBRE_WORKERS`, `SOBRE_LOG_LEVEL`. Lo que quedó
+`sobre.sh` acepta `SOBRE_CPUS`, `SOBRE_MEM`, `SOBRE_WORKERS`, `SOBRE_LOG_LEVEL`, y dos interruptores para medir un
+cambio por partes: `SOBRE_REDIS_URL=` (vacío: la API sin estado compartido) y `SOBRE_COLAPSO=0` (sin candado entre procesos). Lo que quedó
 puesto se lee del contenedor con `sobre.sh ver`, no de este archivo. **Los techos van con el
 sobre:** `PERF_TECHOS` del `target.env` declara `cpu=100` por proceso uvicorn y `conexiones=30` por
 proceso en la base de la API; con `SOBRE_WORKERS=2` son 200 y 60 (L-R9-07: una escalera juzgada con

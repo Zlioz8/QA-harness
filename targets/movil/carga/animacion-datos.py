@@ -52,6 +52,12 @@ def lineas_por_segundo(ruta, desde, hasta):
         if desde <= t <= hasta: d[t] = d.get(t, 0) + 1
     return d
 
+def media_en_meseta(serie, ini, rampa, meseta):
+    """Media de una serie de telemetría dentro de la meseta del paso (None si no hay muestras)."""
+    if not ini: return None
+    xs = [v for t, v in serie.items() if ini + rampa <= t <= ini + rampa + meseta]
+    return round(sum(xs) / len(xs)) if xs else None
+
 def serie_tel(ruta, col, nombre, clave):
     d = {}
     for r in csv.DictReader(open(ruta)):
@@ -154,7 +160,9 @@ def main():
         },
         "resumen": {"peticiones": len(ng), "moodle": len(ws), "p95_meseta": (det.get("meseta") or det["global"])["ms"]["p(95)"], "rps_meseta": (det.get("meseta") or det["global"])["por_segundo"],
                     "procesos": procesos, "rechazos": sum(rechazos), "filas_por_peticion": filas,
-                    "lineas_log_por_peticion": round(sum(log_lineas) / len(ng), 1)},
+                    "lineas_log_por_peticion": round(sum(log_lineas) / len(ng), 1),
+                    "moodle_por_peticion": round(len(ws) / len(ng), 2),
+                    "api_cpu_meseta": media_en_meseta(cpu, ini, rampa, meseta)},
     }
     if tel:
         # Una persona real: cada petición con inicio y fin en ms (reloj del teléfono).

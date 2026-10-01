@@ -1142,3 +1142,28 @@ de 200 en una IP, p95 2.163 → 434 ms y 0 respuestas 429; pico de login de 40 y
 php-fpm no es de esta fase), p95 a 400 de 3.024 → 1.827 ms; escrituras en las tablas de
 rendimiento 6,35 → 0,008 filas por petición; CPU de la base de la API 0,08 → 0,03 núcleos a
 200 personas; líneas de log del backend 44 → 3,4 por petición.
+
+## L-R9-08 — El sobre aprende a encender y apagar piezas: medir un cambio por partes
+
+**Ronda:** #9, 2026-10-01.
+
+**Qué faltaba.** La fase 1 de la app traía tres cosas juntas (cliente HTTP compartido, estado
+compartido en Redis, candado entre procesos) y una sola escalera no dice cuánto aporta cada una.
+El sobre (`targets/movil/carga/sobre.compose.yml`) solo sabía fijar recursos y procesos.
+
+**Qué entró.** Dos interruptores en el sobre, sin tocar el repositorio medido: `SOBRE_REDIS_URL`
+(vacío = la API con memoria de proceso) y `SOBRE_COLAPSO` (0 = sin candado entre procesos).
+`sobre.sh ver` los enseña. Con ellos, la misma escalera corta (aula de 200, tres minutos) corrida
+tres veces separa los efectos: solo el cliente HTTP, Redis sin candado, Redis con candado. La
+telemetría vigila ya el contenedor de Redis, para que su costo entre al presupuesto.
+
+**La animación** ganó el modo antes / después (dos corridas del mismo escenario a la vez) y, en
+su franja de cifras, llamadas a Moodle por petición y CPU de la API en la meseta.
+
+**Trampa del operador, otra vez.** Un guion que espera con `pgrep -f <patrón>` dentro de un
+`bash -c` cuyo texto contiene el patrón se encuentra a sí mismo y no termina nunca: las corridas
+estuvieron media hora sin arrancar. Se espera por la tarea, no por el nombre del proceso.
+
+**Resultado** (corridas `20261001-11*`, `COMPARACION-fase_0-vs-fase_1.md`): a 200 personas la CPU de
+la API baja de 0,45 a 0,27 núcleos y las llamadas a Moodle por petición de 1,64 a 1,39; a 400 el
+p95 pasa de 1.827 a 837 ms. El punto de quiebre no se mueve: php-fpm, 41 de 40 hijos.

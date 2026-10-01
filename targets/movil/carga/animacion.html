@@ -304,22 +304,25 @@ function dibujarComparacion(par, s) {
   const rb = banda(b, s + Math.max(0, b.fase.rampa[0]), 150, paqB);
   // franja: qué cambió, con las cifras de las dos corridas
   px(0, 284, W, 1, P.borde);
-  texto('QUÉ CAMBIÓ · medido en estas dos corridas', 8, 288, P.tinta, 10);
+  texto('QUÉ CAMBIÓ · medido en estas dos corridas', 8, 287, P.tinta, 10);
   const fila = (x, y, rotulo, va, vb) => {
     texto(rotulo, x, y, P.gris, 9);
     const xa = x + ancho(rotulo, 9) + 8; texto(va, xa, y, P.ambar, 9);
     const xf = xa + ancho(va, 9) + 5; texto('→', xf, y, P.gris, 9); texto(vb, xf + ancho('→', 9) + 5, y, P.verde, 9);
   };
   const n = (x) => x == null ? '—' : coma(x);
-  fila(8, 304, 'p95 en la meseta', fms(a.resumen.p95_meseta), fms(b.resumen.p95_meseta));
-  fila(330, 304, 'respuestas 429', String(a.resumen.rechazos), String(b.resumen.rechazos));
-  fila(8, 318, 'filas a la base por petición', n(a.resumen.filas_por_peticion), n(b.resumen.filas_por_peticion));
-  fila(330, 318, 'líneas de log por petición', n(a.resumen.lineas_log_por_peticion), n(b.resumen.lineas_log_por_peticion));
-  let xs = 8; const tramo = (txt, col) => { texto(txt, xs, 336, col, 9); xs += ancho(txt, 9) + 6; };
+  const pc = (x) => x == null ? '—' : `${x} %`;
+  fila(8, 301, 'p95 en la meseta', fms(a.resumen.p95_meseta), fms(b.resumen.p95_meseta));
+  fila(330, 301, 'respuestas 429', String(a.resumen.rechazos), String(b.resumen.rechazos));
+  fila(8, 313, 'llamadas a Moodle por petición', n(a.resumen.moodle_por_peticion), n(b.resumen.moodle_por_peticion));
+  fila(330, 313, 'CPU de la API en la meseta', pc(a.resumen.api_cpu_meseta), pc(b.resumen.api_cpu_meseta));
+  fila(8, 325, 'filas a la base por petición', n(a.resumen.filas_por_peticion), n(b.resumen.filas_por_peticion));
+  fila(330, 325, 'líneas de log por petición', n(a.resumen.lineas_log_por_peticion), n(b.resumen.lineas_log_por_peticion));
+  let xs = 8; const tramo = (txt, col) => { texto(txt, xs, 339, col, 9); xs += ancho(txt, 9) + 6; };
   tramo('en este segundo, p95 de lo que llega:', P.gris); tramo(fms(ra.p95), colP95(ra.p95)); tramo('antes, frente a', P.gris); tramo(fms(rb.p95), colP95(rb.p95)); tramo('después', P.gris);
-  px(8, 349, 300, 5, '#1c2436'); px(8, 349, Math.min(300, (ra.p95 || 0) / 3000 * 300), 5, P.ambar);
-  px(330, 349, 300, 5, '#1c2436'); px(330, 349, Math.min(300, (rb.p95 || 0) / 3000 * 300), 5, P.verde);
-  px(8 + 150, 347, 1, 9, P.tinta); px(330 + 150, 347, 1, 9, P.tinta);
+  px(8, 352, 300, 4, '#1c2436'); px(8, 352, Math.min(300, (ra.p95 || 0) / 3000 * 300), 4, P.ambar);
+  px(330, 352, 300, 4, '#1c2436'); px(330, 352, Math.min(300, (rb.p95 || 0) / 3000 * 300), 4, P.verde);
+  px(8 + 150, 350, 1, 8, P.tinta); px(330 + 150, 350, 1, 8, P.tinta);
 }
 
 // ---- una persona: cada petición como barra, con el tramo del servidor -------------------------
