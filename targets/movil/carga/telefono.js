@@ -109,6 +109,10 @@ const GESTOS = {
     await dormir(300);
     await pulsar('button.login-button');
     await enReposo(2500, 40000);
+    const msg = await js(`(document.querySelector('.mensaje-login') || {}).textContent || ''`);
+    const dentro = !(await esperarVisible('input#ion-input-0', 500));
+    anota({ tipo: 'login', intento: 0, dentro, mensaje: msg.trim().replace(/\s+/g, ' ') });
+    if (!dentro) throw new Error(`no entró: ${msg.trim().slice(0, 80) || 'sin mensaje'}`);
   },
   // Volver al inicio desde donde sea.
   inicio: async () => { await pulsar('ion-tab-button[ng-reflect-router-link="/tabs/home"], ion-tab-button[tab="home"]'); await enReposo(); },
@@ -138,6 +142,40 @@ const GESTOS = {
     await enReposo(2000, 30000);
   },
   atras: async () => { await js('history.back(); true'); await enReposo(); },
+  // ---- flujo de sesión (lo que cambia la fase 0 del plan de capacidad) ----------------------
+  // Cerrar sesión desde el menú lateral: debe volver a la pantalla de login.
+  salir: async () => {
+    if (await esperarVisible('input#ion-input-0', 1500)) { anota({ tipo: 'nota', texto: 'ya estaba en el login' }); return; }
+    if (!(await pulsar('ion-tab-button[aria-controls="menu-principal"]'))) throw new Error('sin botón del menú');
+    await dormir(600);
+    if (!(await pulsar('button.logout-btn'))) throw new Error('sin botón de cerrar sesión');
+    await enReposo(1500, 20000);
+    if (!(await esperarVisible('input#ion-input-0', 10000))) throw new Error('tras cerrar sesión no apareció el login');
+    anota({ tipo: 'nota', texto: 'cerrar sesión → pantalla de login' });
+  },
+  // Contraseña equivocada N veces (TEL_INTENTOS, 11 por omisión) sobre la cuenta del perfil: el
+  // mensaje de cada intento queda anotado. Con el cupo por cuenta (10/min) el undécimo debe
+  // decir «Demasiados intentos».
+  fuerzaBruta: async () => {
+    const n = Number(process.env.TEL_INTENTOS || 11);
+    if (!(await esperarVisible('input#ion-input-0', 8000))) throw new Error('no hay pantalla de login');
+    for (let i = 1; i <= n; i++) {
+      await js(`(() => {
+        const poner = (sel, v) => { const el = document.querySelector(sel); if (!el) return false;
+          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(el, v);
+          el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return true; };
+        return poner('input#ion-input-0', ${JSON.stringify(process.env.TEL_USUARIO || '')}) && poner('input#ion-input-1', 'contrasena-equivocada-' + ${i});
+      })()`);
+      await dormir(300);
+      await pulsar('button.login-button');
+      await enReposo(1200, 30000);
+      const msg = await js(`(document.querySelector('.mensaje-login') || {}).textContent || ''`);
+      anota({ tipo: 'login', intento: i, mensaje: msg.trim().replace(/\s+/g, ' ') });
+      console.log(`    intento ${i}: ${msg.trim().replace(/\s+/g, ' ').slice(0, 90)}`);
+    }
+  },
+  // Deja pasar la ventana del cupo (61 s) antes de volver a entrar.
+  esperar: async () => { await dormir(61000); },
 };
 
 async function dom() {
