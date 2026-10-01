@@ -1110,3 +1110,35 @@ más de 1,5 s.
 paso ANTERIOR: el contenedor de nginx era viejo y su json-log tenía la entrada rota de L-R9-02. Desde
 hoy `sobre.sh poner` recrea también nginx, y los análisis por paso (hook, animación) se recortan a la
 ventana `[inicio − 90 s, inicio + duración]` que k6 deja en `detalle.json`.
+
+## L-R9-07 — El instrumento mide la fase 0 de la app: dos trampas del propio instrumento
+
+**Ronda:** #9, 2026-10-01.
+
+**Qué se midió.** Las seis acciones de la fase 0 del plan de capacidad de Zajuna Móvil (cupo general
+por sesión, login por IP y por cuenta, dos procesos, escrituras fuera del camino de la petición,
+gzip y keepalive en nginx, menos líneas de log), A/B con las mismas escaleras del 2026-09-30 y el
+mismo sobre: `20260930-225523-carga-aula-grande`, `20260930-225844-pico-pico-login-aula`,
+`20260930-231135-carga-escalera` (con `COMPARACION-B_ayer-vs-fase_0.md`).
+
+**Trampa 1: los techos declarados no siguen al sobre.** La escalera se lanzó con `PERF_TECHOS` de un
+proceso (`cpu=100`, `conexiones=30`) sobre un sobre de dos, y `perf-capacidad` atribuyó el cuello a
+«conexiones de la base de la API al 137 % de su techo». Era el techo mal declarado, no la base:
+con los techos de dos procesos (los mismos de la corrida B) el primero en saturar vuelve a ser
+php-fpm (41 de 40 hijos). La corrección quedó escrita en el `RUN.json` (`techos_corregidos`, con
+el motivo) y el perfil declara ya los techos de dos procesos, que es el valor por omisión del
+compose desde la fase 0. Regla: **`sobre.sh poner` y `PERF_TECHOS` se cambian juntos**.
+
+**Trampa 2: k6 no es el cliente de la app.** Con gzip activado en nginx, k6 siguió recibiendo
+56 KB por detalle de curso y el teléfono 4 KB: k6 no manda `Accept-Encoding` y el cliente nativo de
+Android sí (HttpURLConnection negocia gzip por su cuenta; la app no toca esa cabecera). Entró
+`CARGA_CABECERAS` en `lib/k6/carga.js` (JSON con lo que el cliente real manda siempre) y el perfil
+lo declara; medido después: k6 recibe los mismos 4.153 bytes que el teléfono. No se imita el
+`User-Agent`: por él separa `grabacion.py` el tráfico del teléfono del de k6.
+
+**Resultado de la medición** (todo en los `CAPACIDAD.md` y `escrituras.json` de las corridas): aula
+de 200 en una IP, p95 2.163 → 434 ms y 0 respuestas 429; pico de login de 40 y de 120 desde una IP,
+177 y 577 respuestas 429 → 0; escalera, mismo punto de quiebre entre 200 y 400 (el techo de
+php-fpm no es de esta fase), p95 a 400 de 3.024 → 1.827 ms; escrituras en las tablas de
+rendimiento 6,35 → 0,008 filas por petición; CPU de la base de la API 0,08 → 0,03 núcleos a
+200 personas; líneas de log del backend 44 → 3,4 por petición.

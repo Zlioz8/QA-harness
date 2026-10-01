@@ -230,7 +230,7 @@ el ritmo; el perfil guarda el extractor junto al modelo (en `movil`, `carga/grab
 que ese tráfico NO da es la mezcla de una población: si lo generó un probador, la mezcla es un
 supuesto y se escribe como tal, dentro del guion.
 
-**Cinco errores que fabrican un número bonito**, todos medidos aquí:
+**Seis errores que fabrican un número bonito**, todos medidos aquí:
 
 - *Una cuenta para todos los usuarios virtuales.* El backend cachea por persona y la prueba mide
   la caché. → una cuenta por usuario virtual (`k6/datos/cuentas.json`, nunca versionado).
@@ -244,6 +244,10 @@ supuesto y se escribe como tal, dentro del guion.
 - *Medir con la máquina ocupada.* Generador y sistema comparten host: cualquier otra cosa que
   corra entra en la cifra. → se para lo ajeno, y `perf-capacidad` avisa si el host entero pasó
   del 85 % de CPU: ese paso describe el equipo, no la aplicación.
+- *Un cliente que no es el de la app.* k6 no manda `Accept-Encoding`; el cliente nativo de Android
+  negocia gzip solo. Con compresión en el servidor, k6 mide 56 KB donde la app recibe 4 KB
+  (2026-10-01). → `CARGA_CABECERAS` con lo que el cliente real manda siempre, y la cifra de bytes
+  se contrasta con el teléfono.
 
 **La telemetría es lo que convierte el quiebre en un diagnóstico.** El perfil declara qué se mira
 (`PERF_WATCH_CONTAINERS`, `PERF_WATCH_PROCS`) y cuál es el techo de cada pieza (`PERF_TECHOS`),
