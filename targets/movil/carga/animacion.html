@@ -46,7 +46,7 @@
 const DATOS = JSON.parse(document.getElementById('datos').textContent);
 const c = document.getElementById('c'); const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
 const W = c.width, H = c.height;
-const P = { fondo:'#0e1322', tinta:'#e6edf3', gris:'#8892a6', verde:'#5df08a', ambar:'#ffcc4d', rojo:'#ff5c5c', azul:'#5cc3ff', lila:'#c58cff', naranja:'#ff9a3c', panel:'#151b2b', borde:'#2a3550', oscuro:'#0b0f1a', carril:'#25314f' };
+const P = { fondo:'#0e1322', tinta:'#e6edf3', gris:'#8892a6', verde:'#5df08a', ambar:'#ffcc4d', rojo:'#ff5c5c', azul:'#5cc3ff', lila:'#c58cff', naranja:'#ff9a3c', turquesa:'#3de0c8', panel:'#151b2b', borde:'#2a3550', oscuro:'#0b0f1a', carril:'#25314f' };
 const sel = document.getElementById('corrida');
 DATOS.forEach((d, i) => { const o = document.createElement('option'); o.value = i; o.textContent = d.etiqueta + (d.lado ? ` · ${d.lado === 'antes' ? 'antes' : 'después'}` : '') + `  (p95 meseta ${Math.round(d.resumen.p95_meseta)} ms)`; sel.appendChild(o); });
 // Parejas: dos corridas del mismo escenario, una marcada «antes» y otra «despues» (animacion-datos.py).
@@ -196,7 +196,7 @@ function dibujarMultitud(d, s, frac) {
 // Dos bandas con la misma tubería en pequeño. Lo que cambia se ve moverse: las respuestas 429
 // rebotan en nginx, las filas caen a la base de la API por su propio carril y el contador de
 // líneas de log corre dentro de la caja de la API.
-const B = { tel: { x: 8, w: 118 }, nginx: { x: 142, w: 96 }, api: { x: 254, w: 140 }, fpm: { x: 410, w: 140 }, pg: { x: 566, w: 66 } };
+const B = { tel: { x: 8, w: 112 }, nginx: { x: 130, w: 84 }, api: { x: 224, w: 132 }, redis: { x: 366, w: 54 }, fpm: { x: 430, w: 132 }, pg: { x: 572, w: 60 } };
 const ALTO = 86;
 const cx = (z) => z.x + z.w / 2;
 const coma = (x) => String(x).replace('.', ',');
@@ -219,7 +219,7 @@ function banda(d, s, y0, paqs) {
   const cols = 9, iconos = Math.min(d.vus, 36), porIcono = d.vus / iconos;
   const concAPI = S.concurrencia[i] || 0;
   const encendidos = Math.min(Math.round(activos / porIcono), Math.round(iconos * Math.min(1, concAPI / Math.max(1, d.vus))));
-  for (let k = 0; k < iconos; k++) telefono(T.x + 8 + (k % cols) * 12, y + 20 + Math.floor(k / cols) * 16, k < encendidos);
+  for (let k = 0; k < iconos; k++) telefono(T.x + 7 + (k % cols) * 11, y + 20 + Math.floor(k / cols) * 16, k < encendidos);
 
   // nginx
   const N = B.nginx; caja(N.x, y, N.w, ALTO, P.gris, 'nginx');
@@ -240,13 +240,31 @@ function banda(d, s, y0, paqs) {
   textoEn(`espera ${cola}`, A.x + 70, y + 32, A.w - 76, cola > 20 ? P.rojo : cola > 5 ? P.ambar : P.gris, 9);
   const lin = S.log_lineas[i] || 0;
   textoEn(`log ${lin} lín/s`, A.x + 8, y + 54, A.w - 16, lin > 300 ? P.ambar : P.gris, 9);
-  for (let k = 0; k < Math.min(cola, 63); k++) px(A.x + 8 + (k % 21) * 6, y + 66 + Math.floor(k / 21) * 6, 5, 5, cola > 50 ? P.rojo : P.ambar);
-  if (cola > 63) textoEn(`+${cola - 63}`, A.x + A.w - 36, y + 54, 30, P.rojo, 9);
+  for (let k = 0; k < Math.min(cola, 60); k++) px(A.x + 7 + (k % 20) * 6, y + 66 + Math.floor(k / 20) * 6, 5, 5, cola > 50 ? P.rojo : P.ambar);
+  if (cola > 60) textoEn(`+${cola - 60}`, A.x + A.w - 36, y + 54, 30, P.rojo, 9);
+
+  // Redis: lo que comparten los procesos de la API. No está en el camino de la petición hacia
+  // Moodle: por eso no baja a los carriles y se une a la API con un enlace corto. Sus cifras son
+  // de la telemetría del contenedor; en una corrida sin Redis, la caja queda apagada.
+  const Rd = B.redis; const hayRedis = !!d.resumen.redis;
+  caja(Rd.x, y, Rd.w, ALTO, hayRedis ? P.turquesa : '#2f3b57', 'Redis');
+  if (hayRedis) {
+    cilindro(Rd.x + 6, y + 19, 42, P.turquesa, '');
+    const mb = S.redis_mb[i], rc = S.redis_cpu[i];
+    textoEn(mb == null ? '—' : `${Math.round(mb)} MB`, Rd.x + 6, y + 46, Rd.w - 10, P.tinta, 10);
+    textoEn(rc == null ? '' : `CPU ${coma(rc.toFixed(1))} %`, Rd.x + 6, y + 58, Rd.w - 10, P.gris, 8);
+    textoEn('caché y', Rd.x + 6, y + 68, Rd.w - 10, P.gris, 8); textoEn('cupos', Rd.x + 6, y + 76, Rd.w - 10, P.gris, 8);
+    px(A.x + A.w, y + 36, Rd.x - A.x - A.w, 2, P.turquesa); px(A.x + A.w, y + 42, Rd.x - A.x - A.w, 2, P.turquesa);
+  } else {
+    px(Rd.x + 6, y + 19, 42, 24, '#1c2436');
+    textoEn('no había', Rd.x + 6, y + 46, Rd.w - 10, P.gris, 9);
+    textoEn('cada', Rd.x + 6, y + 58, Rd.w - 10, P.gris, 8); textoEn('proceso', Rd.x + 6, y + 66, Rd.w - 10, P.gris, 8); textoEn('aparte', Rd.x + 6, y + 74, Rd.w - 10, P.gris, 8);
+  }
 
   // php-fpm
   const F = B.fpm; caja(F.x, y, F.w, ALTO, P.naranja, 'Moodle · php-fpm');
   const ocup = Math.min(40, Math.round(S.moodle_concurrencia[i] || 0)), procs = Math.round(S.fpm_procesos[i] || 0);
-  for (let k = 0; k < 40; k++) px(F.x + 10 + (k % 20) * 6, y + 19 + Math.floor(k / 20) * 6, 5, 5, k < ocup ? (ocup >= 38 ? P.rojo : P.naranja) : k < procs ? '#5a4030' : '#1c2436');
+  for (let k = 0; k < 40; k++) px(F.x + 6 + (k % 20) * 6, y + 19 + Math.floor(k / 20) * 6, 5, 5, k < ocup ? (ocup >= 38 ? P.rojo : P.naranja) : k < procs ? '#5a4030' : '#1c2436');
   textoEn(`ocupados ${ocup} de 40`, F.x + 8, y + 34, F.w - 16, ocup >= 38 ? P.rojo : P.tinta);
   textoEn(`${S.moodle_llamadas[i]} llamadas/s`, F.x + 8, y + 47, F.w - 16, P.tinta, 9);
   textoEn(`${S.moodle_ms_p50[i] ?? '—'} ms cada una`, F.x + 8, y + 58, F.w - 16, (S.moodle_ms_p50[i] || 0) > 300 ? P.ambar : P.gris, 9);
@@ -255,7 +273,7 @@ function banda(d, s, y0, paqs) {
   // base de la API: filas escritas por segundo = llegadas reales del segundo × filas por petición de la corrida
   const G = B.pg; caja(G.x, y, G.w, ALTO, P.lila, 'BD API');
   const fpp = d.resumen.filas_por_peticion; const filasSeg = fpp == null ? null : (S.llegadas[i] || 0) * fpp;
-  cilindro(G.x + 12, y + 19, 42, P.azul, '');
+  cilindro(G.x + 9, y + 19, 42, P.azul, '');
   textoEn(filasSeg == null ? '—' : filasSeg >= 10 ? `${Math.round(filasSeg)}/s` : `${coma(filasSeg.toFixed(1))}/s`, G.x + 6, y + 46, G.w - 12, (filasSeg || 0) > 20 ? P.ambar : P.verde, 10);
   textoEn('filas', G.x + 6, y + 58, G.w - 12, P.gris, 8);
   textoEn(fpp == null ? '' : `${coma(fpp)}/pet`, G.x + 6, y + 69, G.w - 12, P.gris, 8);
@@ -400,7 +418,7 @@ function leyenda() {
   if (modo === 'comparar') {
     const par = PAREJAS[ipar], a = DATOS[par.a], b = DATOS[par.b];
     L.innerHTML = `<b>Las dos corridas del mismo escenario, con el mismo reloj</b> (segundos desde que empieza a entrar la carga): arriba como estaba, abajo con el cambio. Mismo guion, mismas cuentas y mismo sobre. <b>Qué es real:</b> llegadas, p95 y respuestas 429 de cada segundo (log de nginx); personas esperando dentro de la API y llamadas a Moodle a la vez (log <code>[ws]</code>); CPU y trabajadores de php-fpm (telemetría); líneas que el backend escribió en su log ese segundo. Las filas por segundo hacia la base de la API son las llegadas reales de ese segundo por las filas por petición medidas en la corrida entera (<code>escrituras.json</code>). Un teléfono encendido es una persona que en ese momento espera una respuesta. <b>Qué es dibujo:</b> la posición de cada punto dentro de su segundo.<br>
-      <span class="k" style="background:#5df08a"></span>petición de menos de 0,5 s · <span class="k" style="background:#ffcc4d"></span>entre 0,5 y 1,5 s · <span class="k" style="background:#ff5c5c"></span>más de 1,5 s, o un 429 que rebota en nginx (cuadro rojo hueco) · <span class="k" style="background:#c58cff"></span>filas escritas en la base de la API. Antes: ${a.resumen.peticiones} peticiones, p95 en la meseta ${Math.round(a.resumen.p95_meseta)} ms. Después: ${b.resumen.peticiones} peticiones, p95 ${Math.round(b.resumen.p95_meseta)} ms.`;
+      <span class="k" style="background:#5df08a"></span>petición de menos de 0,5 s · <span class="k" style="background:#ffcc4d"></span>entre 0,5 y 1,5 s · <span class="k" style="background:#ff5c5c"></span>más de 1,5 s, o un 429 que rebota en nginx (cuadro rojo hueco) · <span class="k" style="background:#c58cff"></span>filas escritas en la base de la API · <span class="k" style="background:#3de0c8"></span>Redis: la memoria que comparten los procesos de la API (caché por persona y cupos); no está en el camino hacia Moodle, y su memoria y su CPU son las de su contenedor en ese segundo. Antes: ${a.resumen.peticiones} peticiones, p95 en la meseta ${Math.round(a.resumen.p95_meseta)} ms. Después: ${b.resumen.peticiones} peticiones, p95 ${Math.round(b.resumen.p95_meseta)} ms.`;
     return;
   }
   L.innerHTML = modo === 'multitud'

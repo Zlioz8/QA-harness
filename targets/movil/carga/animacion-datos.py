@@ -87,6 +87,9 @@ def main():
     cpu = serie_tel(os.path.join(d, "telemetria", "contenedores.csv"), "cpu_pct", "movil_api-web-1", "contenedor")
     fpm = serie_tel(os.path.join(d, "telemetria", "procesos.csv"), "procesos", "phpfpm", "grupo")
     fpmcpu = serie_tel(os.path.join(d, "telemetria", "procesos.csv"), "cpu_pct", "phpfpm", "grupo")
+    # Redis: solo hay muestras si el contenedor existía y el perfil lo vigilaba en esa corrida.
+    rcpu = serie_tel(os.path.join(d, "telemetria", "contenedores.csv"), "cpu_pct", "movil_api-redis-1", "contenedor")
+    rmem = serie_tel(os.path.join(d, "telemetria", "contenedores.csv"), "mem_mb", "movil_api-redis-1", "contenedor")
     n = t1 - t0
     llegadas = [0] * n; salidas = [0] * n; vuelo = [0] * n; rts = [[] for _ in range(n)]; errores = [0] * n; rechazos = [0] * n
     mvuelo = [0] * n; mllam = [0] * n; mms = [[] for _ in range(n)]
@@ -153,6 +156,7 @@ def main():
         "series": {
             "llegadas": llegadas, "salidas": salidas, "en_vuelo": vuelo, "concurrencia": conc, "errores": errores,
             "rechazos": rechazos, "log_lineas": log_lineas,
+            "redis_cpu": [cerca(rcpu, t0 + s) for s in range(n)], "redis_mb": [cerca(rmem, t0 + s) for s in range(n)],
             "moodle_concurrencia": mconc,
             "p50": [q(x, .5) for x in rts], "p95": [q(x, .95) for x in rts],
             "moodle_llamadas": mllam, "moodle_en_vuelo": mvuelo, "moodle_ms_p50": [q(x, .5) for x in mms],
@@ -161,7 +165,7 @@ def main():
         "resumen": {"peticiones": len(ng), "moodle": len(ws), "p95_meseta": (det.get("meseta") or det["global"])["ms"]["p(95)"], "rps_meseta": (det.get("meseta") or det["global"])["por_segundo"],
                     "procesos": procesos, "rechazos": sum(rechazos), "filas_por_peticion": filas,
                     "lineas_log_por_peticion": round(sum(log_lineas) / len(ng), 1),
-                    "moodle_por_peticion": round(len(ws) / len(ng), 2),
+                    "moodle_por_peticion": round(len(ws) / len(ng), 2), "redis": bool(rcpu),
                     "api_cpu_meseta": media_en_meseta(cpu, ini, rampa, meseta)},
     }
     if tel:
