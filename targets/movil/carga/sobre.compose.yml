@@ -18,6 +18,8 @@
 #                            API con memoria de proceso, que es el «antes» de ese cambio.
 #   SOBRE_COLAPSO            1 = un proceso espera el cálculo que otro ya hace; 0 lo apaga, para
 #                            medir cuánto aporta el candado entre procesos.
+#   SOBRE_LECTURAS           segundos que vale lo que Moodle le contestó a una persona (45 por omisión);
+#                            0 lo apaga, que es el «antes» de ese cambio (app/utils/lecturas.py).
 services:
   web:
     cpus: ${SOBRE_CPUS:-4}
@@ -29,3 +31,4 @@ services:
       - WEB_CONCURRENCY=${SOBRE_WORKERS:-1}
       - REDIS_URL=${SOBRE_REDIS_URL-redis://redis:6379/0}
       - ESTADO_COLAPSO=${SOBRE_COLAPSO:-1}
+      - LECTURAS_TTL_S=${SOBRE_LECTURAS:-45}

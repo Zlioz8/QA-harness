@@ -1240,3 +1240,33 @@ mismo trabajo. Dos trampas de lectura salieron de ahí:
 - **Quitar peticiones baratas empeora los percentiles sin empeorar nada.** El p95 del panel a 400
   personas pasó de 0,9 a 6,4 s: antes, dos de cada tres respuestas eran repeticiones instantáneas
   que diluían la cola. El percentil por ruta hay que leerlo junto al número de peticiones.
+
+## L-R9-11 — Atribuir cada llamada del backend a la ruta que la causó, y simular antes de escribir
+
+**Ronda:** #9, 2026-10-01.
+
+**Qué se buscaba.** Tras la fase 2 la app pedía un tercio menos y el techo no se había movido. La
+pregunta ya no era «cuántas peticiones» sino «de dónde sale el trabajo que llega a Moodle».
+
+**Cómo.** El `rid` que nginx le pone a cada petición es el mismo que el backend escribe en cada línea
+`[ws]` (una por llamada a Moodle). Uniendo los dos logs de un paso se obtiene, por ruta de la app:
+cuántas llamadas a Moodle cuesta, de qué funciones y cuánto tiempo. Salió que el panel y el detalle de
+curso eran el 54 % del tiempo de Moodle y que pedían las mismas lecturas con segundos de diferencia.
+
+**Simular sobre el log antes de tocar el código.** Con ese mismo log se contó cuántas llamadas se
+habrían evitado guardando 45 s por persona seis lecturas: −25 % de llamadas y −27 % de tiempo. Medido
+después con el cambio hecho: −20 % y −27 %. La simulación costó minutos y acertó el orden de magnitud;
+sirvió para decidir entre ese cambio y otro que pedía desplegar un complemento en Moodle.
+
+**Lo que el número no anticipó.** Un 20 % menos de trabajo movió el punto de quiebre de 200–400 a
+400–700 personas, y a 400 el tiempo dentro de Moodle cayó un 67 %, no un 20 %: por debajo de la
+saturación desaparece la cola y cada llamada vuelve a tardar lo que tarda (168 → 69 ms). Cerca del
+quiebre, un ahorro pequeño de trabajo es un cambio grande de latencia; lejos de él, casi no se nota
+(a 200 personas el p95 pasó de 268 a 240 ms).
+
+**Para medir el «antes» el mismo día:** `SOBRE_LECTURAS=0 targets/movil/carga/sobre.sh poner` apaga el
+cambio sin tocar el código (el backend lee `LECTURAS_TTL_S`).
+
+**Cuidado con la evidencia.** Las respuestas del detalle de curso llevan URLs firmadas con el token de
+Moodle de la cuenta. Para comparar dos respuestas se guarda el resultado de la comparación, no las
+respuestas.

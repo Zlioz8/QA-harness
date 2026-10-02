@@ -19,7 +19,7 @@ ver() {
   docker inspect movil_api-web-1 --format 'cpus={{.HostConfig.NanoCpus}} mem={{.HostConfig.Memory}} creado={{.Created}}' 2>/dev/null \
     | awk '{gsub("cpus=","cpus="); print}' | sed -E 's/cpus=([0-9]+)/cpus=\1 (nanoCPU; 0 = sin límite)/'
   docker top movil_api-web-1 -o pid,args 2>/dev/null | sed 1d | sed 's/^/  proceso: /'
-  docker exec movil_api-web-1 sh -c 'env | grep -E "^(PROXY_HOPS|LOG_LEVEL|DEBUG|WEB_CONCURRENCY|JOSSO_ENABLED|REDIS_URL|ESTADO_COLAPSO)=" | sort | tr "\n" " "' 2>/dev/null; echo
+  docker exec movil_api-web-1 sh -c 'env | grep -E "^(PROXY_HOPS|LOG_LEVEL|DEBUG|WEB_CONCURRENCY|JOSSO_ENABLED|REDIS_URL|ESTADO_COLAPSO|LECTURAS_TTL_S)=" | sort | tr "\n" " "' 2>/dev/null; echo
 }
 
 esperar() {
