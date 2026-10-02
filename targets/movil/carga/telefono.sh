@@ -39,6 +39,18 @@ if [ -z "$PID" ]; then
 fi
 [ -n "$PID" ] || { echo "telefono: la app $APP no arranca" >&2; exit 2; }
 
+# Con otra app en primer plano el WebView no expone ninguna página y el recorrido no puede empezar.
+# No se trae al frente por la fuerza: si hay otra app abierta es que alguien está usando el teléfono.
+# `TEL_TRAER=1` lo hace cuando el aparato es solo para la prueba.
+DELANTE="$(adb shell dumpsys activity activities 2>/dev/null | tr -d '\r' | sed -n 's/.*topResumedActivity=ActivityRecord{[^ ]* [^ ]* \([^/ ]*\)\/.*/\1/p' | head -1)"
+if [ -n "$DELANTE" ] && [ "$DELANTE" != "$APP" ]; then
+  if [ "${TEL_TRAER:-0}" = "1" ]; then
+    adb shell monkey -p "$APP" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 4
+  else
+    echo "telefono: en primer plano está $DELANTE, no $APP; deja la app abierta en el teléfono (o TEL_TRAER=1) y vuelve a correr" >&2; exit 2
+  fi
+fi
+
 adb forward --remove tcp:9223 >/dev/null 2>&1 || true
 adb forward tcp:9223 "localabstract:webview_devtools_remote_$PID" >/dev/null || { echo "telefono: sin socket de depuración (¿WEBVIEW_DEBUG=true?)" >&2; exit 2; }
 WS=$(curl -s --max-time 5 http://127.0.0.1:9223/json | python3 -c '
