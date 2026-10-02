@@ -1270,3 +1270,34 @@ cambio sin tocar el código (el backend lee `LECTURAS_TTL_S`).
 **Cuidado con la evidencia.** Las respuestas del detalle de curso llevan URLs firmadas con el token de
 Moodle de la cuenta. Para comparar dos respuestas se guarda el resultado de la comparación, no las
 respuestas.
+
+## L-R9-12 — Repetir AAA después de tocar rendimiento, y auditar con qué credencial sale cada llamada
+
+**Ronda:** #9, 2026-10-01.
+
+**Por qué.** La campaña de capacidad tocó justo lo que el barrido AAA había dejado cerrado: los
+cupos del acceso, la caché por persona y el cliente hacia el sistema de detrás. Una mejora de
+rendimiento que guarda respuestas es, por construcción, un riesgo de autorización.
+
+**Qué se hizo.** `make aaa TARGET=movil` contra el código nuevo y comparación sonda a sonda con
+`aaa.json` de la línea base (31 sondas, ninguna cambió). Después, las sondas que la suite no trae y
+que el cambio pedía: dos cuentas alternándose sobre el mismo recurso con las respuestas guardadas,
+la puerta que autoriza justo después de servir un permiso guardado, una cabecera de origen falsa
+contra cada cupo, y lo que queda en la tabla de auditoría y en el log.
+
+**Tres cosas que valen para cualquier perfil:**
+
+- **La sonda destructiva del limitador va sola.** Con `AAA_DESTRUCTIVO=1` en la misma corrida, la
+  sonda agota el cupo de la cuenta y la matriz de autorización cae con once fallos que son todos
+  `login failed: 429`. Leído deprisa parece que la autorización se rompió. Se corre aparte, se
+  espera un minuto y se repite la suite sin ella para dejar el informe canónico.
+- **La política de credenciales se audita en el log, no en el código.** Las 127 llamadas del
+  backend pasaban un token; cuál pasaban solo se veía en ejecución. Con un campo en la línea de
+  cada llamada (`quien=persona|sistema`) la política es un `grep` sobre cualquier corrida: en la
+  escalera entera, cero llamadas con la credencial de servicio.
+- **Guardar una respuesta alarga también la revocación.** El plazo largo se reservó a lo que no
+  decide nada; lo que dice si alguien puede abrir un recurso se quedó en el plazo corto, con un
+  test que quita el acceso y comprueba cuándo deja de verse.
+
+**Lo que se encontró.** Nada roto. Una lectura que salía con la credencial de servicio desde hacía
+diez meses (corregida), y tres descuidos de la propia campaña (corregidos).
