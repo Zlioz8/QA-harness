@@ -281,8 +281,11 @@ def analizar(man, pasos, env):
 
     for p in pasos:
         p["saturacion"] = saturacion(p)
+        # El host se juzga como las piezas: por el p90, no por la media. A 700 usuarios de Zajuna
+        # Móvil el host marcaba 59 % de media y 99 % en el p90, y la media lo daba por tranquilo
+        # mientras cada llamada al sistema de detrás tardaba el doble (L-R9-13).
         host = ((p.get("tel") or {}).get("host") or {}).get("cpu_pct")
-        p["host_cpu"] = host["media"] if host else None
+        p["host_cpu"] = (host.get("p90", host["max"]) if host else None)
 
     # El recurso limitante se lee en el paso donde aparece el problema (rodilla o primer fallo).
     foco = (rodilla[1] if rodilla else None) or primer_fallo
@@ -406,13 +409,13 @@ def escribir_informe(target, corrida, man, pasos, an, demanda, filas_dem):
 
     if an["host_saturado"]:
         w("> [!warning] Medición NO concluyente en algunos pasos")
-        w(f"> El host entero pasó del 85 % de CPU en los pasos de {', '.join(str(x) for x in an['host_saturado'])} usuarios. "
+        w(f"> El host entero pasó del 85 % de CPU (p90) en los pasos de {', '.join(str(x) for x in an['host_saturado'])} usuarios. "
           "Ahí el generador y el sistema compitieron por la misma máquina: la cifra describe el equipo, no la aplicación.")
         w("")
 
     w("## Escalera")
     w("")
-    w("| Usuarios | pet/s | p50 ms | p95 ms | p99 ms | Error % | CPU host % | Veredicto |")
+    w("| Usuarios | pet/s | p50 ms | p95 ms | p99 ms | Error % | CPU host p90 % | Veredicto |")
     w("|---:|---:|---:|---:|---:|---:|---:|---|")
     for p in pasos:
         w(f"| {p['vus']} | {fmt(p['rps'], '{:.1f}')} | {fmt(p['p50'])} | {fmt(p['p95'])} | {fmt(p['p99'])} | "

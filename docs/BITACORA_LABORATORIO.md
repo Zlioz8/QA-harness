@@ -1301,3 +1301,36 @@ contra cada cupo, y lo que queda en la tabla de auditoría y en el log.
 
 **Lo que se encontró.** Nada roto. Una lectura que salía con la credencial de servicio desde hacía
 diez meses (corregida), y tres descuidos de la propia campaña (corregidos).
+
+## L-R9-13 — Abrir un techo declarado sin más CPU, y juzgar el host como a las piezas
+
+**Ronda:** #9, 2026-10-02.
+
+**Por qué.** La escalera señalaba a php-fpm (40 hijos, 41 en los picos) como la pieza que se saturaba
+primero. Darle 80 hijos con dos procesos de API no movió el techo; darle 80 con cuatro procesos lo
+**empeoró**: a 700 usuarios el p95 pasó de 0,54 a 1,8 s y cada llamada al sistema de detrás tardó el
+doble. El host (6 núcleos, 12 hilos) estaba al 99 % en el p90 con 40 y con 80: abrir php-fpm no
+daba CPU, la repartía entre el doble de peticiones, y la cola se movió de la cola de escucha (barata,
+en orden) a dentro de PHP, con 2,5 GB más de RAM y el doble de procesos de PostgreSQL.
+
+**Qué se hizo.** Dos escaleras idénticas salvo `pm.max_children`, comparadas con `perf-capacidad.py
+comparar`; la telemetría del host (`host.csv`), de los procesos (`procesos.csv`) y la latencia por
+función del log del backend (`[ws] … ms=`) para explicar la diferencia. Después, un cambio en el
+instrumento: el host se juzga por el **p90** de su CPU, como a las piezas, no por la media.
+
+**Tres cosas que valen para cualquier perfil:**
+
+- **Un techo declarado es una hipótesis del instrumento, no del sistema.** `PERF_TECHOS` declara lo
+  que cada pieza puede dar; cuando una pieza toca el suyo, la pregunta es si el recurso que hay
+  debajo (CPU, RAM, disco) tiene de dónde dar más. Si no, subir el techo solo cambia dónde se espera.
+  Se mide con la misma escalera dos veces, y la telemetría del host explica el resultado.
+- **La media del host engaña igual que la de un proceso.** A 700 usuarios el host marcaba 59 % de
+  media y 99 % en el p90; con la media el informe lo daba por tranquilo. `perf-capacidad.py` ya usa
+  el p90 para el aviso de «medición no concluyente» y en la columna de la escalera.
+- **Más trabajadores que CPU empeora la latencia de cola.** Vale para php-fpm, para procesos de
+  aplicación y para hilos de base de datos: el número de trabajadores se dimensiona por núcleos y
+  RAM del nodo, no por la demanda que llega. La demanda se absorbe con cómputo o con menos trabajo
+  por petición.
+
+Evidencia: `reports/movil/k6/runs/20261002-121433-carga-escalera` y `20261002-131903-carga-escalera`
+(`COMPARACION-cuatro_procesos-vs-cuatro_y_fpm80.md`); `MOVIL/_evidencia/20261002-techo-php-fpm/INFORME.md` §6.
